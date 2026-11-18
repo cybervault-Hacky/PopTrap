@@ -1,0 +1,94 @@
+/* POPTRAP Phase 1 — Base Terminal Stylesheet
+ * Dark, restrained, minimal cybersecurity-utility aesthetic.
+ */
+
+Screen {
+    background: $background;
+    color: $foreground;
+    layers: base overlay;
+}
+
+.screen-shell {
+    width: 100%;
+    height: 1fr;
+    align: center middle;
+    padding: 1 3;
+}
+
+Screen.compact .screen-shell {
+    padding: 0 2;
+}
+
+.content-frame {
+    width: 62;
+    max-width: 100%;
+    height: auto;
+}
+
+.section-header-block {
+    width: 100%;
+    height: 2;
+    margin-bottom: 1;
+}
+
+Screen.compact .section-header-block {
+    margin-bottom: 0;
+}
+
+/* Restrained, flat button controls without heavy 3D borders */
+Button.action-btn {
+    min-width: 12;
+    height: 1;
+    border: none;
+    background: $surface;
+    color: $foreground;
+    text-style: none;
+    padding: 0 2;
+    margin-right: 2;
+}
+
+Button.action-btn:hover {
+    background: $panel;
+    color: $foreground;
+}
+
+Button.action-btn:focus {
+    background: $primary;
+    color: $button-color-foreground;
+    text-style: bold;
+}
+
+/* Bottom key hint bar */
+KeyHintBar {
+    dock: bottom;
+    width: 100%;
+    height: 1;
+    background: $background;
+    color: $text-dim;
+    padding: 0 2;
+}
+
+/* Terminal-too-small overlay */
+ResizeNotice {
+    layer: overlay;
+    display: none;
+    width: 100%;
+    height: 100%;
+    background: $background;
+    color: $foreground;
+    content-align: center middle;
+    text-align: center;
+    padding: 1 2;
+}
+
+Screen.too-small ResizeNotice {
+    display: block;
+}
+
+Screen.too-small .screen-shell {
+    display: none;
+}
+
+Screen.too-small KeyHintBar {
+    display: none;
+}

@@ -1,0 +1,235 @@
+/* POPTRAP Phase 3 — Responsive Breakpoints, Touch Targets & Orientations
+ * Covers compact phones (320px+), standard mobile, landscape phones, tablets,
+ * and wide desktop viewports while keeping SIMULATION + Exit accessible.
+ */
+
+/* Touch devices: enforce comfortable >= 44px hit targets */
+@media (pointer: coarse) {
+  .bar-btn {
+    min-height: var(--touch-min);
+    padding: 0 14px;
+  }
+
+  .btn {
+    min-height: var(--touch-min);
+  }
+
+  .popup-close {
+    width: var(--touch-min);
+    height: var(--touch-min);
+  }
+}
+
+/* Wide desktop (>= 1280px): generous breathing room, capped reading measure */
+@media (min-width: 1280px) {
+  .view-panel,
+  .stage-root {
+    padding: var(--space-8) var(--space-6);
+  }
+
+  .storm-shell {
+    max-width: 1120px;
+  }
+}
+
+/* Tablet range (640px – 1023px) */
+@media (min-width: 640px) and (max-width: 1023px) {
+  .view-panel,
+  .stage-root {
+    padding: var(--space-5) var(--space-4);
+  }
+
+  .card,
+  .glitch-panel,
+  .scanner-wrap,
+  .crash-wrap,
+  .countdown-wrap {
+    padding: var(--space-6) var(--space-5);
+  }
+
+  .popup-card {
+    width: min(264px, calc(50% - 20px));
+  }
+}
+
+/* Mobile handsets (<= 639px: Android phones & iPhones in portrait) */
+@media (max-width: 639px) {
+  :root {
+    --bar-height: 56px;
+  }
+
+  .safety-bar {
+    padding-left: max(var(--space-3), env(safe-area-inset-left, 0px));
+    padding-right: max(var(--space-3), env(safe-area-inset-right, 0px));
+    gap: var(--space-1);
+  }
+
+  .safety-brand {
+    gap: 6px;
+  }
+
+  .brand-mark {
+    font-size: 0.78rem;
+    letter-spacing: 0.1em;
+  }
+
+  /* Keep SIMULATION badge visible on phones in a compact legible form */
+  .sim-pill {
+    font-size: 0.6rem;
+    letter-spacing: 0.05em;
+    padding: 3px 5px;
+  }
+
+  .safety-controls {
+    gap: 6px;
+  }
+
+  .timer-badge {
+    font-size: 0.74rem;
+    padding: 4px 6px;
+  }
+
+  .bar-btn {
+    min-height: 40px;
+    padding: 0 11px;
+    font-size: 0.78rem;
+  }
+
+  .view-panel,
+  .stage-root {
+    padding: var(--space-4) var(--space-3);
+  }
+
+  .card,
+  .glitch-panel,
+  .scanner-wrap,
+  .crash-wrap,
+  .countdown-wrap {
+    padding: var(--space-5) var(--space-4);
+  }
+
+  .action-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .action-row .btn {
+    width: 100%;
+    min-height: var(--touch-min);
+  }
+
+  .diag-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+  }
+
+  .diag-value {
+    text-align: left;
+  }
+
+  /* Popup Storm switches cleanly to a bounded single-column scrollable stack */
+  .storm-shell {
+    min-height: calc(100dvh - var(--bar-height) - 32px);
+  }
+
+  .storm-toolbar {
+    padding: var(--space-2) var(--space-3);
+  }
+
+  .storm-arena {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    padding: var(--space-3);
+    min-height: 280px;
+    max-height: calc(100dvh - var(--bar-height) - 108px);
+    overflow-y: auto;
+    overflow-x: hidden;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .popup-card {
+    position: relative;
+    width: 100%;
+    transform: none;
+    animation: fx-card-in var(--popup-enter-ms, 200ms) var(--ease-out) both;
+  }
+
+  .popup-card.is-clearing {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+
+  .popup-close {
+    width: 38px;
+    height: 38px;
+  }
+}
+
+/* Ultra-compact viewports (<= 380px, e.g. iPhone SE / split-screen mobile) */
+@media (max-width: 380px) {
+  .brand-mark {
+    display: none;
+  }
+
+  /* SIMULATION indicator and Exit control remain prominently visible */
+  .sim-pill {
+    display: inline-flex;
+    font-size: 0.62rem;
+    padding: 4px 6px;
+  }
+
+  .bar-btn-theme {
+    padding: 0 8px;
+    font-size: 0.7rem;
+  }
+
+  .bar-btn-exit {
+    padding: 0 12px;
+  }
+}
+
+/* Landscape phones (short viewport height) */
+@media (max-height: 520px) and (orientation: landscape) {
+  :root {
+    --bar-height: 46px;
+  }
+
+  .view-panel,
+  .stage-root {
+    align-items: flex-start;
+    padding: var(--space-3) var(--space-4);
+  }
+
+  .card,
+  .glitch-panel,
+  .scanner-wrap,
+  .crash-wrap,
+  .countdown-wrap {
+    padding: var(--space-4) var(--space-5);
+  }
+
+  .action-row {
+    flex-direction: row;
+    align-items: center;
+  }
+
+  .action-row .btn {
+    width: auto;
+  }
+
+  .countdown-ring-box {
+    width: 138px;
+    height: 138px;
+    margin: var(--space-3) auto;
+  }
+
+  .countdown-digits {
+    font-size: 1.85rem;
+  }
+
+  .storm-arena {
+    min-height: 220px;
+  }
+}

@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="referrer" content="no-referrer">
+  <meta name="color-scheme" content="dark">
+  <title>POPTRAP — Browser Bluetooth Compatibility</title>
+  <link rel="stylesheet" href="/static/styles/themes.css">
+  <link rel="stylesheet" href="/static/styles/base.css">
+  <link rel="stylesheet" href="/static/styles/responsive.css">
+  <link rel="stylesheet" href="/static/styles/bluetooth.css">
+</head>
+<body>
+  <header class="safety-bar" role="banner" aria-label="POPTRAP Bluetooth compatibility header">
+    <div class="safety-brand">
+      <span class="brand-mark">POPTRAP</span>
+      <span class="sim-pill">SIMULATION</span>
+    </div>
+    <div class="safety-controls">
+      <span class="sim-pill">LOCALHOST ONLY</span>
+    </div>
+  </header>
+
+  <main id="bt-compat-root" class="app-main">
+    <section class="view-panel" aria-labelledby="bt-web-title">
+      <div class="card bt-compat-wrap">
+        <p class="eyebrow">PHASE 5 · WEB BLUETOOTH CHECK</p>
+        <h1 id="bt-web-title" class="card-title">Browser Bluetooth Compatibility</h1>
+        <p class="consent-note">
+          POPTRAP checks Web Bluetooth capability without requesting device access automatically.
+          Device access is requested only after an explicit click, uses your browser's permission
+          dialog, filters exclusively to the POPTRAP BLE invitation service, and never runs any
+          prank automatically.
+        </p>
+
+        <div class="bt-status-grid" role="region" aria-label="Detected browser Bluetooth status">
+          <span class="bt-key">Capability</span>
+          <span class="bt-val"><span id="bt-web-state" class="bt-state-pill">CHECKING</span></span>
+
+          <span class="bt-key">Details</span>
+          <span id="bt-web-reason" class="bt-val">Inspecting browser Bluetooth support...</span>
+
+          <span class="bt-key">Connection</span>
+          <span id="bt-web-connection" class="bt-val">DISCONNECTED — No Web Bluetooth device connected.</span>
+        </div>
+
+        <div class="action-row">
+          <button id="btn-web-bt-check" type="button" class="btn btn-secondary">Check Browser Status</button>
+          <button id="btn-web-bt-connect" type="button" class="btn btn-primary is-hidden" disabled>Select POPTRAP BLE Device</button>
+          <button id="btn-web-bt-disconnect" type="button" class="btn btn-secondary is-hidden" disabled>Disconnect</button>
+        </div>
+
+        <p id="bt-web-feedback" class="bt-feedback" role="status" aria-live="polite"></p>
+
+        <p class="eyebrow">BROWSER &amp; PLATFORM LIMITATIONS</p>
+        <ul id="bt-web-limits" class="bt-limits"></ul>
+      </div>
+    </section>
+  </main>
+
+  <script src="/static/scripts/bluetooth.js" defer></script>
+</body>
+</html>

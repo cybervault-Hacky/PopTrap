@@ -1,0 +1,221 @@
+/* POPTRAP Phase 3 — Visual Theme & Design Token System
+ * Four primary functional themes (dark, terminal, neon, minimal) plus
+ * Phase 2 backward-compatible theme aliases (cyan-dark, ice-dark, mono-dark).
+ * All palettes meet WCAG 2.1 AA+ contrast ratios without excessive gradients or glow.
+ */
+
+:root {
+  /* Typography tokens */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  --body-font: var(--font-sans);
+  --heading-font: var(--font-sans);
+
+  /* Spacing scale */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 28px;
+  --space-8: 32px;
+
+  /* Geometry & layout */
+  --bar-height: 54px;
+  --radius-sm: 4px;
+  --radius-control: 5px;
+  --radius-card: 8px;
+  --control-height: 36px;
+  --button-height: 42px;
+  --touch-min: 44px;
+
+  /* Elevation (restrained, never glowing) */
+  --shadow-card: 0 12px 30px rgba(0, 0, 0, 0.34);
+  --shadow-popup: 0 10px 24px rgba(0, 0, 0, 0.44);
+
+  /* Motion timing & curves */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out: cubic-bezier(0.45, 0, 0.55, 1);
+  --dur-fast: 140ms;
+  --dur-base: 220ms;
+  --dur-slow: 340ms;
+  --dur-view: 240ms;
+
+  /* Layering (safety bar always above stage elements) */
+  --z-stage-bg: 1;
+  --z-stage-content: 10;
+  --z-stage-overlay: 40;
+  --z-safety-bar: 1000;
+}
+
+/* 1. Dark — professional charcoal interface (default) */
+:root,
+html[data-theme="dark"] {
+  --bg: #0e1116;
+  --surface: #151a22;
+  --panel: #1d2430;
+  --bar-bg: rgba(14, 17, 22, 0.94);
+  --border: #2a3444;
+  --border-strong: #3b495e;
+  --fg: #ebeff5;
+  --fg-muted: #93a2b7;
+  --accent: #38bdf8;
+  --accent-secondary: #7dd3fc;
+  --accent-soft: rgba(56, 189, 248, 0.12);
+  --accent-secondary-soft: rgba(125, 211, 252, 0.10);
+  --accent-contrast: #08121c;
+  --split-alt: #f87171;
+  --warn: #facc15;
+  --scanline-tint: rgba(235, 239, 245, 0.08);
+  --slice-a: rgba(56, 189, 248, 0.15);
+  --slice-b: rgba(248, 113, 113, 0.12);
+  --body-font: var(--font-sans);
+  --heading-font: var(--font-sans);
+  --radius-control: 5px;
+  --radius-card: 8px;
+}
+
+/* 2. Terminal — restrained green terminal-inspired presentation */
+html[data-theme="terminal"] {
+  --bg: #090e0b;
+  --surface: #0f1612;
+  --panel: #16211b;
+  --bar-bg: rgba(9, 14, 11, 0.95);
+  --border: #21362a;
+  --border-strong: #31513f;
+  --fg: #e2f2e8;
+  --fg-muted: #8ab39a;
+  --accent: #34d399;
+  --accent-secondary: #6ee7b7;
+  --accent-soft: rgba(52, 211, 153, 0.12);
+  --accent-secondary-soft: rgba(110, 231, 183, 0.10);
+  --accent-contrast: #06140e;
+  --split-alt: #fbbf24;
+  --warn: #fcd34d;
+  --scanline-tint: rgba(52, 211, 153, 0.09);
+  --slice-a: rgba(52, 211, 153, 0.16);
+  --slice-b: rgba(251, 191, 36, 0.12);
+  --body-font: var(--font-mono);
+  --heading-font: var(--font-mono);
+  --radius-control: 3px;
+  --radius-card: 4px;
+}
+
+/* 3. Neon — controlled cyan and purple dual-accent presentation */
+html[data-theme="neon"] {
+  --bg: #0b0d17;
+  --surface: #121626;
+  --panel: #191f34;
+  --bar-bg: rgba(11, 13, 23, 0.94);
+  --border: #283152;
+  --border-strong: #3b4775;
+  --fg: #eef2ff;
+  --fg-muted: #9aa6c8;
+  --accent: #22d3ee;
+  --accent-secondary: #c084fc;
+  --accent-soft: rgba(34, 211, 238, 0.13);
+  --accent-secondary-soft: rgba(192, 132, 252, 0.13);
+  --accent-contrast: #071019;
+  --split-alt: #c084fc;
+  --warn: #facc15;
+  --scanline-tint: rgba(192, 132, 252, 0.08);
+  --slice-a: rgba(34, 211, 238, 0.16);
+  --slice-b: rgba(192, 132, 252, 0.16);
+  --body-font: var(--font-sans);
+  --heading-font: var(--font-sans);
+  --radius-control: 5px;
+  --radius-card: 8px;
+}
+
+/* 4. Minimal — clean, neutral high-contrast presentation */
+html[data-theme="minimal"] {
+  --bg: #121315;
+  --surface: #191b1e;
+  --panel: #22252a;
+  --bar-bg: rgba(18, 19, 21, 0.95);
+  --border: #2f333b;
+  --border-strong: #434954;
+  --fg: #f3f4f6;
+  --fg-muted: #9ca3af;
+  --accent: #e5e7eb;
+  --accent-secondary: #d1d5db;
+  --accent-soft: rgba(229, 231, 235, 0.10);
+  --accent-secondary-soft: rgba(209, 213, 219, 0.08);
+  --accent-contrast: #111214;
+  --split-alt: #9ca3af;
+  --warn: #f3f4f6;
+  --scanline-tint: rgba(243, 244, 246, 0.06);
+  --slice-a: rgba(229, 231, 235, 0.12);
+  --slice-b: rgba(156, 163, 175, 0.10);
+  --shadow-card: 0 6px 18px rgba(0, 0, 0, 0.24);
+  --shadow-popup: 0 6px 16px rgba(0, 0, 0, 0.30);
+  --body-font: var(--font-sans);
+  --heading-font: var(--font-sans);
+  --radius-control: 4px;
+  --radius-card: 6px;
+}
+
+/* Phase 2 backward-compatible theme aliases */
+html[data-theme="cyan-dark"] {
+  --bg: #0a0e14;
+  --surface: #101620;
+  --panel: #161f2c;
+  --bar-bg: rgba(10, 14, 20, 0.94);
+  --border: #243244;
+  --border-strong: #33465e;
+  --fg: #e6edf3;
+  --fg-muted: #8fa2b8;
+  --accent: #22d3ee;
+  --accent-secondary: #67e8f9;
+  --accent-soft: rgba(34, 211, 238, 0.13);
+  --accent-secondary-soft: rgba(103, 232, 249, 0.10);
+  --accent-contrast: #081018;
+  --split-alt: #fb7185;
+  --warn: #eab308;
+  --scanline-tint: rgba(230, 237, 243, 0.08);
+  --slice-a: rgba(34, 211, 238, 0.15);
+  --slice-b: rgba(251, 113, 133, 0.13);
+}
+
+html[data-theme="ice-dark"] {
+  --bg: #0c1117;
+  --surface: #131b24;
+  --panel: #1b2634;
+  --bar-bg: rgba(12, 17, 23, 0.94);
+  --border: #2a3a4f;
+  --border-strong: #3b506b;
+  --fg: #f0f6fc;
+  --fg-muted: #93a6bc;
+  --accent: #7dd3fc;
+  --accent-secondary: #bae6fd;
+  --accent-soft: rgba(125, 211, 252, 0.13);
+  --accent-secondary-soft: rgba(186, 230, 253, 0.10);
+  --accent-contrast: #09111a;
+  --split-alt: #f472b6;
+  --warn: #eab308;
+  --scanline-tint: rgba(240, 246, 252, 0.08);
+  --slice-a: rgba(125, 211, 252, 0.15);
+  --slice-b: rgba(244, 114, 182, 0.13);
+}
+
+html[data-theme="mono-dark"] {
+  --bg: #0a0a0c;
+  --surface: #131317;
+  --panel: #1c1c22;
+  --bar-bg: rgba(10, 10, 12, 0.95);
+  --border: #2f2f39;
+  --border-strong: #434351;
+  --fg: #f4f4f5;
+  --fg-muted: #a1a1ad;
+  --accent: #f4f4f5;
+  --accent-secondary: #d4d4d8;
+  --accent-soft: rgba(244, 244, 245, 0.11);
+  --accent-secondary-soft: rgba(212, 212, 216, 0.09);
+  --accent-contrast: #0a0a0c;
+  --split-alt: #a1a1aa;
+  --warn: #d4d4d8;
+  --scanline-tint: rgba(244, 244, 245, 0.06);
+  --slice-a: rgba(244, 244, 245, 0.12);
+  --slice-b: rgba(161, 161, 170, 0.10);
+}

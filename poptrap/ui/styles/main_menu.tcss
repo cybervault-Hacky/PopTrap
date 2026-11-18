@@ -1,0 +1,66 @@
+/* Main menu screen layout and restrained selection styling */
+
+MainMenuScreen .menu-frame {
+    width: 52;
+    max-width: 100%;
+    height: auto;
+}
+
+BrandHeader {
+    width: 100%;
+    height: auto;
+    margin-bottom: 1;
+}
+
+MainMenuScreen.compact BrandHeader {
+    margin-bottom: 0;
+}
+
+MainMenuList {
+    width: 100%;
+    height: auto;
+    max-height: 12;
+    background: $background;
+    border: none;
+    padding: 0;
+    scrollbar-size: 0 0;
+}
+
+MainMenuList:focus {
+    border: none;
+    background: $background;
+}
+
+MainMenuList > .option-list--option {
+    padding: 0 1;
+    color: $foreground;
+    background: $background;
+}
+
+MainMenuList > .option-list--option-hover {
+    background: $surface;
+    color: $foreground;
+}
+
+MainMenuList > .option-list--option-highlighted {
+    background: $surface;
+    color: $primary;
+    text-style: bold;
+}
+
+MainMenuList:focus > .option-list--option-highlighted {
+    background: $panel;
+    color: $primary;
+    text-style: bold;
+}
+
+#startup-notice {
+    width: 100%;
+    height: auto;
+    margin-top: 1;
+    color: $warning;
+}
+
+#startup-notice.hidden {
+    display: none;
+}
