@@ -1,0 +1,232 @@
+/* POPTRAP Phase 3 — Reusable Keyframes, State Transitions & Reduced Motion
+ * Exclusively animates GPU-composited properties (transform and opacity).
+ * Flicker periods stay >= 2.6s (< 0.4 Hz) to prevent photosensitive triggers.
+ */
+
+@keyframes fx-view-in {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 8px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes fx-surface-in {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 10px, 0) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@keyframes fx-card-in {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 8px, 0) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@keyframes fx-popup-in {
+  from {
+    opacity: 0;
+    transform: translate3d(var(--card-x, 0px), calc(var(--card-y, 0px) + 10px), 0) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(var(--card-x, 0px), var(--card-y, 0px), 0) scale(1);
+  }
+}
+
+@keyframes fx-scanline-drift {
+  from {
+    transform: translate3d(0, 0, 0);
+  }
+  to {
+    transform: translate3d(0, 16px, 0);
+  }
+}
+
+@keyframes fx-gentle-flicker {
+  0%,
+  100% {
+    opacity: 0;
+  }
+  42% {
+    opacity: var(--flicker-opacity, 0.05);
+  }
+  58% {
+    opacity: 0.01;
+  }
+  84% {
+    opacity: calc(var(--flicker-opacity, 0.05) * 0.55);
+  }
+}
+
+@keyframes fx-progress-sheen {
+  from {
+    transform: translate3d(-100%, 0, 0);
+  }
+  to {
+    transform: translate3d(220%, 0, 0);
+  }
+}
+
+@keyframes fx-particle-burst {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 0, 0) scale(0.5);
+  }
+  20% {
+    opacity: 0.85;
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(var(--p-tx, 0px), var(--p-ty, -36px), 0) scale(0.9);
+  }
+}
+
+@keyframes fx-settle-pulse {
+  0% {
+    opacity: 0.82;
+    transform: scale(0.99);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Reusable transition utility classes */
+.fx-view-enter {
+  animation: fx-view-in var(--dur-view) var(--ease-out) both;
+}
+
+.fx-stage-enter {
+  animation: fx-surface-in var(--fx-enter-ms, var(--dur-base)) var(--ease-out) both;
+}
+
+.fx-item-enter {
+  animation: fx-card-in var(--fx-enter-ms, var(--dur-base)) var(--ease-out) both;
+}
+
+.fx-item-exit {
+  opacity: 0 !important;
+  transform: translate3d(0, -4px, 0) scale(0.96) !important;
+  pointer-events: none;
+  transition: opacity var(--fx-exit-ms, 180ms) var(--ease-out),
+    transform var(--fx-exit-ms, 180ms) var(--ease-out);
+}
+
+.fx-settled {
+  animation: fx-settle-pulse var(--dur-slow) var(--ease-out) both;
+}
+
+/* Pause continuous decorative CSS animations cleanly when document is hidden */
+html[data-page-hidden="true"] .fx-scanlines,
+html[data-page-hidden="true"] .glitch-flicker,
+html[data-page-hidden="true"] .scanner-sheen,
+html[data-page-hidden="true"] .fx-particle {
+  animation-play-state: paused !important;
+}
+
+/* Comprehensive reduced-motion support (both OS media query & runtime flag) */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-fast: 1ms;
+    --dur-base: 1ms;
+    --dur-slow: 1ms;
+    --dur-view: 1ms;
+  }
+
+  .fx-view-enter,
+  .fx-stage-enter,
+  .fx-item-enter,
+  .fx-settled,
+  .fx-scanlines,
+  .glitch-flicker,
+  .scanner-sheen,
+  .popup-card,
+  .finding-card,
+  .scanner-verdict,
+  .crash-wrap,
+  .fx-particle {
+    animation: none !important;
+  }
+
+  .bar-btn,
+  .btn,
+  .progress-fill,
+  .glitch-panel,
+  .glitch-title::before,
+  .glitch-title::after,
+  .glitch-slice,
+  .popup-card,
+  .countdown-wrap,
+  .countdown-ring-fg,
+  .countdown-digits,
+  .crash-wrap {
+    transition: none !important;
+  }
+
+  .glitch-flicker,
+  .glitch-slices,
+  .scanner-sheen,
+  .fx-particle-layer {
+    display: none !important;
+  }
+
+  .countdown-digits.is-tick {
+    transform: none !important;
+  }
+}
+
+html[data-reduced-motion="true"] .fx-view-enter,
+html[data-reduced-motion="true"] .fx-stage-enter,
+html[data-reduced-motion="true"] .fx-item-enter,
+html[data-reduced-motion="true"] .fx-settled,
+html[data-reduced-motion="true"] .fx-scanlines,
+html[data-reduced-motion="true"] .glitch-flicker,
+html[data-reduced-motion="true"] .scanner-sheen,
+html[data-reduced-motion="true"] .popup-card,
+html[data-reduced-motion="true"] .finding-card,
+html[data-reduced-motion="true"] .scanner-verdict,
+html[data-reduced-motion="true"] .crash-wrap,
+html[data-reduced-motion="true"] .fx-particle {
+  animation: none !important;
+}
+
+html[data-reduced-motion="true"] .bar-btn,
+html[data-reduced-motion="true"] .btn,
+html[data-reduced-motion="true"] .progress-fill,
+html[data-reduced-motion="true"] .glitch-panel,
+html[data-reduced-motion="true"] .glitch-title::before,
+html[data-reduced-motion="true"] .glitch-title::after,
+html[data-reduced-motion="true"] .glitch-slice,
+html[data-reduced-motion="true"] .popup-card,
+html[data-reduced-motion="true"] .countdown-wrap,
+html[data-reduced-motion="true"] .countdown-ring-fg,
+html[data-reduced-motion="true"] .countdown-digits,
+html[data-reduced-motion="true"] .crash-wrap {
+  transition: none !important;
+}
+
+html[data-reduced-motion="true"] .glitch-flicker,
+html[data-reduced-motion="true"] .glitch-slices,
+html[data-reduced-motion="true"] .scanner-sheen,
+html[data-reduced-motion="true"] .fx-particle-layer {
+  display: none !important;
+}
+
+html[data-reduced-motion="true"] .countdown-digits.is-tick {
+  transform: none !important;
+}

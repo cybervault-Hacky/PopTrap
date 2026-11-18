@@ -1,0 +1,120 @@
+/* POPTRAP Phase 5 — Bluetooth Engine Terminal Screen Stylesheet */
+
+BluetoothScreen .bt-frame {
+    width: 96;
+    max-width: 100%;
+    height: auto;
+    max-height: 100%;
+    padding: 1 2;
+    background: $surface;
+    border: tall $panel;
+}
+
+BluetoothScreen.compact .bt-frame {
+    padding: 0 1;
+    border: none;
+}
+
+BluetoothScreen #bt-scroll {
+    width: 100%;
+    height: auto;
+    max-height: 1fr;
+}
+
+BluetoothScreen .bt-section-title {
+    width: 100%;
+    margin-top: 1;
+    color: $primary;
+    text-style: bold;
+}
+
+BluetoothScreen .bt-panel {
+    width: 100%;
+    height: auto;
+    padding: 0 1;
+    margin-top: 0;
+    color: $foreground;
+    background: $background;
+    border: round $panel;
+}
+
+BluetoothScreen .bt-muted-panel {
+    width: 100%;
+    height: auto;
+    padding: 0 1;
+    color: $text-muted;
+    background: $background;
+    border: round $panel;
+}
+
+BluetoothScreen .bt-row {
+    width: 100%;
+    height: auto;
+    layout: horizontal;
+    margin-top: 1;
+    align-vertical: middle;
+}
+
+BluetoothScreen .bt-label {
+    width: 20;
+    color: $text-muted;
+    padding-right: 1;
+}
+
+BluetoothScreen .bt-input {
+    width: 18;
+}
+
+BluetoothScreen .bt-select {
+    width: 1fr;
+}
+
+BluetoothScreen .bt-confirm-bar {
+    width: 100%;
+    height: auto;
+    margin-top: 1;
+    padding: 1;
+    background: $background;
+    border: heavy $primary;
+}
+
+BluetoothScreen .bt-confirm-text {
+    width: 100%;
+    height: auto;
+    color: $foreground;
+    margin-bottom: 1;
+}
+
+BluetoothScreen .bt-confirm-buttons {
+    width: 100%;
+    height: auto;
+    layout: horizontal;
+}
+
+BluetoothScreen .bt-actions {
+    width: 100%;
+    height: auto;
+    layout: horizontal;
+    margin-top: 1;
+}
+
+BluetoothScreen .bt-actions Button,
+BluetoothScreen .bt-confirm-buttons Button {
+    margin-right: 1;
+    min-width: 10;
+}
+
+BluetoothScreen .bt-feedback {
+    width: 100%;
+    height: auto;
+    margin-top: 1;
+    color: $primary;
+}
+
+BluetoothScreen .bt-feedback.error {
+    color: $error;
+}
+
+BluetoothScreen .hidden {
+    display: none;
+}

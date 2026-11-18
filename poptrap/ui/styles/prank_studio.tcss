@@ -1,0 +1,237 @@
+/* POPTRAP Phase 4 — Prank Studio and Preset Manager TUI styling */
+
+PrankStudioScreen .studio-frame,
+PresetManagerScreen .studio-frame {
+    width: 76;
+    max-width: 100%;
+    height: 1fr;
+    max-height: 34;
+}
+
+PrankStudioScreen.compact .studio-frame,
+PresetManagerScreen.compact .studio-frame {
+    height: 1fr;
+    max-height: 100%;
+}
+
+#studio-scroll,
+#presets-scroll {
+    width: 100%;
+    height: 1fr;
+    background: $background;
+    border: none;
+    scrollbar-size-vertical: 1;
+}
+
+.studio-row {
+    width: 100%;
+    height: auto;
+    min-height: 1;
+    layout: horizontal;
+    align-vertical: middle;
+    margin-bottom: 0;
+}
+
+.studio-row.hidden,
+.specific-group.hidden,
+#stage-editor.hidden,
+#studio-preview-panel.hidden,
+.confirm-bar.hidden,
+.studio-warn.hidden {
+    display: none;
+}
+
+.specific-group,
+#stage-editor {
+    width: 100%;
+    height: auto;
+}
+
+.studio-label {
+    width: 16;
+    height: 1;
+    color: $text-dim;
+}
+
+PrankStudioScreen.compact .studio-label,
+PresetManagerScreen.compact .studio-label {
+    width: 14;
+}
+
+.studio-subtext {
+    width: 100%;
+    height: auto;
+    color: $secondary;
+}
+
+.studio-section-divider {
+    width: 100%;
+    height: 1;
+    margin-top: 1;
+    color: $primary;
+    text-style: bold;
+}
+
+PrankStudioScreen.compact .studio-section-divider {
+    margin-top: 0;
+}
+
+/* Flat dark controls matching POPTRAP design system */
+PrankStudioScreen Input,
+PresetManagerScreen Input {
+    width: 1fr;
+    height: 1;
+    border: none;
+    background: $surface;
+    color: $foreground;
+    padding: 0 1;
+}
+
+PrankStudioScreen Input:focus,
+PresetManagerScreen Input:focus {
+    border: none;
+    background: $panel;
+    color: $foreground;
+}
+
+PrankStudioScreen Input.short-input {
+    width: 14;
+}
+
+PrankStudioScreen Select,
+PresetManagerScreen Select {
+    width: 34;
+    max-width: 1fr;
+    height: auto;
+}
+
+PrankStudioScreen Select > SelectCurrent,
+PresetManagerScreen Select > SelectCurrent {
+    border: none;
+    background: $surface;
+    color: $foreground;
+    padding: 0 1;
+    height: 1;
+}
+
+PrankStudioScreen Select:focus > SelectCurrent,
+PresetManagerScreen Select:focus > SelectCurrent {
+    border: none;
+    background: $panel;
+    color: $primary;
+    text-style: bold;
+}
+
+PrankStudioScreen SelectOverlay,
+PresetManagerScreen SelectOverlay {
+    background: $surface;
+    border: tall $border-subtle;
+    color: $foreground;
+}
+
+PrankStudioScreen Switch {
+    border: none;
+    background: $surface;
+    padding: 0 1;
+    height: 1;
+    width: auto;
+}
+
+PrankStudioScreen Switch:focus {
+    background: $panel;
+}
+
+PrankStudioScreen Switch > .switch--slider {
+    color: $text-dim;
+    background: $surface;
+}
+
+PrankStudioScreen Switch.-on > .switch--slider {
+    color: $primary;
+    background: $surface;
+}
+
+.composer-btn-row {
+    width: 100%;
+    height: 1;
+    layout: horizontal;
+}
+
+.composer-btn-row Button.action-btn {
+    min-width: 5;
+    padding: 0 1;
+    margin-right: 1;
+}
+
+#studio-preview-panel {
+    width: 100%;
+    height: auto;
+    background: $surface;
+    padding: 0 1;
+}
+
+.studio-detail-box {
+    width: 100%;
+    height: auto;
+    background: $surface;
+    color: $foreground;
+    padding: 1;
+    margin-top: 1;
+    margin-bottom: 1;
+}
+
+PresetManagerScreen.compact .studio-detail-box {
+    padding: 0 1;
+    margin-top: 0;
+    margin-bottom: 0;
+}
+
+.studio-warn {
+    width: 100%;
+    height: auto;
+    color: $warning;
+}
+
+.confirm-bar {
+    width: 100%;
+    height: 1;
+    layout: horizontal;
+    background: $surface;
+    padding: 0 1;
+}
+
+.confirm-msg {
+    width: 1fr;
+    height: 1;
+    color: $warning;
+}
+
+.studio-feedback {
+    width: 100%;
+    height: auto;
+    min-height: 1;
+    color: $primary;
+}
+
+.studio-feedback.error {
+    color: $error;
+}
+
+.studio-actions {
+    width: 100%;
+    height: 1;
+    layout: horizontal;
+    margin-top: 1;
+}
+
+PrankStudioScreen.compact .studio-actions,
+PresetManagerScreen.compact .studio-actions {
+    margin-top: 0;
+}
+
+PrankStudioScreen Button.action-btn,
+PresetManagerScreen Button.action-btn {
+    min-width: 6;
+    padding: 0 1;
+    margin-right: 1;
+}

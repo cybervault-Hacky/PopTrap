@@ -1,0 +1,118 @@
+"""POPTRAP Phase 2 Prank Engine subsystem."""
+
+from __future__ import annotations
+
+from poptrap.engine.bluetooth import (
+    BluetoothEngine,
+    CapabilityReport,
+    CapabilityState,
+)
+from poptrap.engine.controller import PrankController
+from poptrap.engine.lifecycle import (
+    ALLOWED_TRANSITIONS,
+    TERMINAL_STATES,
+    assert_transition,
+    can_transition,
+    is_terminal_state,
+)
+from poptrap.engine.models import (
+    AnimationSpeed,
+    DEFAULT_DURATION_SECONDS,
+    DEFAULT_POPUP_COUNT,
+    DEFAULT_REVEAL_MESSAGE,
+    MAX_ACTIVE_SESSIONS,
+    MAX_DURATION_SECONDS,
+    MAX_POPUP_COUNT,
+    MIN_DURATION_SECONDS,
+    MIN_POPUP_COUNT,
+    LEGACY_PRANK_THEMES,
+    PRANK_THEME_CATALOG,
+    PRIMARY_PRANK_THEMES,
+    MaintenanceReport,
+    PrankConfig,
+    PrankTheme,
+    PreviewStage,
+    SessionSnapshot,
+    SessionState,
+    TemplateId,
+    TemplateMetadata,
+    TemplatePreview,
+    VisualIntensity,
+)
+from poptrap.engine.registry import TemplateRegistry, create_default_registry
+from poptrap.engine.runtime import (
+    DEFAULT_BIND_HOST,
+    ExperienceServer,
+    create_runtime_app,
+)
+from poptrap.engine.scheduler import SessionScheduler
+from poptrap.engine.studio import (
+    MAX_COMPOSITION_DURATION_SECONDS,
+    MAX_STUDIO_STAGES,
+    PresetRecord,
+    PresetStore,
+    PresetSummary,
+    StageKind,
+    StudioConfig,
+    StudioStage,
+    validate_preset_id,
+    validate_studio_config,
+)
+from poptrap.engine.validation import (
+    generate_session_id,
+    validate_prank_config,
+    validate_session_id,
+)
+
+__all__ = [
+    "ALLOWED_TRANSITIONS",
+    "AnimationSpeed",
+    "BluetoothEngine",
+    "CapabilityReport",
+    "CapabilityState",
+    "DEFAULT_BIND_HOST",
+    "DEFAULT_DURATION_SECONDS",
+    "DEFAULT_POPUP_COUNT",
+    "DEFAULT_REVEAL_MESSAGE",
+    "ExperienceServer",
+    "MAX_ACTIVE_SESSIONS",
+    "MAX_COMPOSITION_DURATION_SECONDS",
+    "MAX_DURATION_SECONDS",
+    "MAX_POPUP_COUNT",
+    "MAX_STUDIO_STAGES",
+    "MIN_DURATION_SECONDS",
+    "MIN_POPUP_COUNT",
+    "LEGACY_PRANK_THEMES",
+    "PRANK_THEME_CATALOG",
+    "PRIMARY_PRANK_THEMES",
+    "MaintenanceReport",
+    "PrankConfig",
+    "PrankController",
+    "PrankTheme",
+    "PresetRecord",
+    "PresetStore",
+    "PresetSummary",
+    "PreviewStage",
+    "SessionScheduler",
+    "SessionSnapshot",
+    "SessionState",
+    "StageKind",
+    "StudioConfig",
+    "StudioStage",
+    "TERMINAL_STATES",
+    "TemplateId",
+    "TemplateMetadata",
+    "TemplatePreview",
+    "TemplateRegistry",
+    "VisualIntensity",
+    "assert_transition",
+    "can_transition",
+    "create_default_registry",
+    "create_runtime_app",
+    "generate_session_id",
+    "is_terminal_state",
+    "validate_prank_config",
+    "validate_preset_id",
+    "validate_session_id",
+    "validate_studio_config",
+]

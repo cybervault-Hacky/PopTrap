@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="referrer" content="no-referrer">
+  <meta name="color-scheme" content="dark">
+  <title>POPTRAP — Prank Studio</title>
+  <link rel="stylesheet" href="/static/styles/themes.css">
+  <link rel="stylesheet" href="/static/styles/base.css">
+  <link rel="stylesheet" href="/static/styles/animations.css">
+  <link rel="stylesheet" href="/static/styles/effects.css">
+  <link rel="stylesheet" href="/static/styles/responsive.css">
+  <link rel="stylesheet" href="/static/styles/studio.css">
+</head>
+<body class="studio-page">
+  <header class="safety-bar studio-header" role="banner" aria-label="Prank Studio header">
+    <div class="safety-brand">
+      <span class="brand-mark">POPTRAP</span>
+      <span class="sim-pill">PRANK STUDIO</span>
+      <span class="studio-scope-tag">LOCALHOST ONLY</span>
+    </div>
+    <div class="safety-controls">
+      <button id="btn-header-preview" type="button" class="bar-btn bar-btn-subtle">Live Preview</button>
+      <button id="btn-header-save" type="button" class="bar-btn bar-btn-subtle">Save Preset</button>
+      <button id="btn-header-launch" type="button" class="bar-btn bar-btn-exit">Start Local Session</button>
+    </div>
+  </header>
+
+  <div id="sr-announcer" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
+
+  <main class="studio-main">
+    <div id="studio-banner" class="studio-banner is-hidden" role="status" aria-live="polite">
+      <span id="studio-banner-text" class="studio-banner-text"></span>
+      <div id="studio-banner-actions" class="studio-banner-actions"></div>
+    </div>
+
+    <div class="studio-grid">
+      <!-- Left column: Builder configuration & stage composer -->
+      <div class="studio-editor-col">
+        <!-- 1. Template selection -->
+        <section class="studio-section" aria-labelledby="heading-templates">
+          <div class="section-head">
+            <div>
+              <p class="section-eyebrow">STEP 1</p>
+              <h2 id="heading-templates" class="section-title">Template</h2>
+            </div>
+            <button id="btn-reset-defaults" type="button" class="studio-btn studio-btn-ghost">Reset Defaults</button>
+          </div>
+          <div id="template-grid" class="template-grid" role="radiogroup" aria-label="Prank template selection"></div>
+        </section>
+
+        <!-- 2. General customization -->
+        <section class="studio-section" aria-labelledby="heading-general">
+          <div class="section-head">
+            <div>
+              <p class="section-eyebrow">STEP 2</p>
+              <h2 id="heading-general" class="section-title">General Settings</h2>
+            </div>
+          </div>
+
+          <div class="field-grid">
+            <label class="field-item">
+              <span class="field-label">Experience name</span>
+              <input id="field-name" class="studio-input" type="text" maxlength="60" autocomplete="off">
+            </label>
+            <label class="field-item">
+              <span class="field-label">Display title</span>
+              <input id="field-title" class="studio-input" type="text" maxlength="60" autocomplete="off">
+            </label>
+            <label class="field-item field-span-2">
+              <span class="field-label">Simulation message</span>
+              <input id="field-message" class="studio-input" type="text" maxlength="180" autocomplete="off">
+            </label>
+            <label class="field-item field-span-2">
+              <span class="field-label">Reveal message</span>
+              <input id="field-reveal" class="studio-input" type="text" maxlength="200" autocomplete="off">
+            </label>
+            <label class="field-item">
+              <span class="field-label">Theme</span>
+              <select id="field-theme" class="studio-select"></select>
+            </label>
+            <label class="field-item">
+              <span class="field-label">Duration (5–120s)</span>
+              <input id="field-duration" class="studio-input" type="number" min="5" max="120" step="1">
+            </label>
+            <label class="field-item">
+              <span class="field-label">Visual intensity</span>
+              <select id="field-intensity" class="studio-select">
+                <option value="low">Low — subtle</option>
+                <option value="medium">Medium — balanced</option>
+                <option value="high">High — theatrical (safe)</option>
+              </select>
+            </label>
+            <label class="field-item">
+              <span class="field-label">Animation speed</span>
+              <select id="field-speed" class="studio-select">
+                <option value="slow">Slow</option>
+                <option value="normal">Normal</option>
+                <option value="fast">Fast</option>
+              </select>
+            </label>
+            <label class="field-item field-checkbox field-span-2">
+              <input id="field-sound" class="studio-checkbox" type="checkbox">
+              <span class="field-label-inline">Enable optional low-volume simulation audio cues (plays only after consent)</span>
+            </label>
+          </div>
+        </section>
+
+        <!-- 3. Context-sensitive template settings -->
+        <section class="studio-section" aria-labelledby="heading-specific">
+          <div class="section-head">
+            <div>
+              <p class="section-eyebrow">STEP 3 · TEMPLATE CONTROLS</p>
+              <h2 id="heading-specific" class="section-title">Template Settings</h2>
+            </div>
+            <span id="specific-template-chip" class="studio-chip"></span>
+          </div>
+          <div id="specific-fields" class="field-grid"></div>
+        </section>
+
+        <!-- 4. Multi-Stage Experience Composer -->
+        <section class="studio-section" aria-labelledby="heading-composer">
+          <div class="section-head">
+            <div>
+              <p class="section-eyebrow">STEP 4 · OPTIONAL SEQUENCE</p>
+              <h2 id="heading-composer" class="section-title">Multi-Stage Composer</h2>
+            </div>
+            <span id="stage-budget-chip" class="studio-chip">Single-stage mode</span>
+          </div>
+          <p class="section-hint">
+            Chain up to 5 sequential stages (max 120s total). Each stage finishes and cleans up completely before the next begins.
+          </p>
+          <div class="composer-toolbar">
+            <button id="btn-starter-stages" type="button" class="studio-btn studio-btn-secondary">Use 4-Stage Starter</button>
+            <button id="btn-add-stage" type="button" class="studio-btn studio-btn-secondary">Add Stage</button>
+            <button id="btn-clear-stages" type="button" class="studio-btn studio-btn-ghost">Single-Stage Mode</button>
+            <button id="btn-validate" type="button" class="studio-btn studio-btn-ghost">Validate</button>
+          </div>
+          <div id="stage-list" class="stage-list"></div>
+        </section>
+      </div>
+
+      <!-- Right column: Live Preview + Local Presets -->
+      <div class="studio-side-col">
+        <!-- Live Preview -->
+        <section class="studio-section preview-section" aria-labelledby="heading-preview">
+          <div class="section-head">
+            <div>
+              <p class="section-eyebrow">REAL RENDERING ENGINE</p>
+              <h2 id="heading-preview" class="section-title">Live Preview</h2>
+            </div>
+            <div class="preview-controls">
+              <button id="btn-preview-start" type="button" class="studio-btn studio-btn-primary">Start Preview</button>
+              <button id="btn-preview-restart" type="button" class="studio-btn studio-btn-secondary" disabled>Restart</button>
+              <button id="btn-preview-stop" type="button" class="studio-btn studio-btn-ghost" disabled>Stop</button>
+            </div>
+          </div>
+
+          <div id="preview-viewport" class="preview-viewport preview-theme-scope" data-theme="dark" role="region" aria-label="Local simulation live preview">
+            <div class="preview-safety-strip">
+              <div class="preview-safety-left">
+                <span class="sim-pill">SIMULATION</span>
+                <span id="preview-state-label" class="preview-state-label">LOCAL PREVIEW · IDLE</span>
+              </div>
+              <div class="preview-safety-right">
+                <span id="preview-timer" class="timer-badge is-hidden">00:00</span>
+                <button id="btn-preview-mute" type="button" class="bar-btn bar-btn-subtle is-hidden" aria-pressed="false">Mute</button>
+                <button id="btn-preview-exit" type="button" class="bar-btn bar-btn-exit is-hidden" aria-label="Exit preview simulation">Exit</button>
+              </div>
+            </div>
+
+            <div id="preview-idle" class="preview-placeholder">
+              <p class="eyebrow">READY TO PREVIEW</p>
+              <p id="preview-summary-title" class="preview-placeholder-title">Custom Experience</p>
+              <p id="preview-summary-meta" class="meta-line">Click Start Preview to run this exact configuration locally in the POPTRAP engine. Press Exit or Esc anytime.</p>
+            </div>
+
+            <div id="preview-stage-root" class="preview-stage-root is-hidden"></div>
+
+            <div id="preview-reveal" class="preview-placeholder is-hidden">
+              <p class="eyebrow">SIMULATION REVEAL</p>
+              <p id="preview-reveal-title" class="preview-placeholder-title">Preview finished.</p>
+              <p id="preview-reveal-body" class="reveal-body"></p>
+              <div class="composer-toolbar">
+                <button id="btn-preview-return" type="button" class="studio-btn studio-btn-secondary">Return to Editor</button>
+                <button id="btn-preview-replay" type="button" class="studio-btn studio-btn-ghost">Replay</button>
+              </div>
+            </div>
+          </div>
+
+          <p id="preview-link-line" class="section-hint preview-link-line">
+            Strictly local browser preview — no external connections, alerts, or device access.
+          </p>
+        </section>
+
+        <!-- Saved Presets -->
+        <section class="studio-section" aria-labelledby="heading-presets">
+          <div class="section-head">
+            <div>
+              <p class="section-eyebrow">LOCAL STORAGE ONLY</p>
+              <h2 id="heading-presets" class="section-title">Saved Presets</h2>
+            </div>
+            <div class="preview-controls">
+              <button id="btn-save-preset" type="button" class="studio-btn studio-btn-primary">Save Preset</button>
+              <button id="btn-save-new" type="button" class="studio-btn studio-btn-ghost is-hidden">Save as New</button>
+            </div>
+          </div>
+
+          <p id="loaded-preset-indicator" class="section-hint">Editing unsaved draft.</p>
+          <div id="preset-inline-prompt" class="preset-prompt is-hidden" role="region" aria-label="Preset action confirmation"></div>
+          <div id="preset-warnings" class="preset-warnings is-hidden" role="status"></div>
+          <div id="preset-details" class="preset-details is-hidden" role="region" aria-label="Preset details"></div>
+          <div id="preset-list" class="preset-list"></div>
+        </section>
+      </div>
+    </div>
+  </main>
+
+  <script src="/static/scripts/accessibility.js" defer></script>
+  <script src="/static/scripts/effects/effects_manager.js" defer></script>
+  <script src="/static/scripts/effects/scanlines.js" defer></script>
+  <script src="/static/scripts/effects/transitions.js" defer></script>
+  <script src="/static/scripts/effects/particles.js" defer></script>
+  <script src="/static/scripts/effects/glitch.js" defer></script>
+  <script src="/static/scripts/effects/sequence.js" defer></script>
+  <script src="/static/scripts/effects.js" defer></script>
+  <script src="/static/scripts/studio.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,159 @@
+/* Settings screen layout and control styling */
+
+SettingsScreen .settings-shell {
+    width: 100%;
+    height: 1fr;
+    align: center middle;
+    padding: 1 3;
+}
+
+SettingsScreen.compact .settings-shell {
+    padding: 0 2;
+}
+
+SettingsScreen .settings-frame {
+    width: 66;
+    max-width: 100%;
+    height: auto;
+    max-height: 100%;
+}
+
+#settings-scroll {
+    width: 100%;
+    height: auto;
+    max-height: 15;
+    background: $background;
+    border: none;
+    scrollbar-size-vertical: 1;
+}
+
+SettingsScreen.compact .settings-frame {
+    height: 1fr;
+}
+
+SettingsScreen.compact #settings-scroll {
+    height: 1fr;
+    max-height: 1fr;
+}
+
+.setting-row {
+    width: 100%;
+    height: auto;
+    min-height: 1;
+    layout: horizontal;
+    align-vertical: middle;
+    margin-bottom: 1;
+}
+
+SettingsScreen.compact .setting-row {
+    margin-bottom: 0;
+}
+
+.setting-label {
+    width: 18;
+    height: 1;
+    color: $text-dim;
+}
+
+.setting-readonly {
+    width: 1fr;
+    height: auto;
+    color: $foreground;
+}
+
+.setting-readonly-muted {
+    width: 1fr;
+    height: auto;
+    color: $secondary;
+}
+
+.setting-control {
+    width: 1fr;
+    height: auto;
+}
+
+/* Compact, restrained Select styling */
+SettingsScreen Select {
+    width: 32;
+    max-width: 100%;
+    height: auto;
+}
+
+SettingsScreen Select > SelectCurrent {
+    border: none;
+    background: $surface;
+    color: $foreground;
+    padding: 0 1;
+    height: 1;
+}
+
+SettingsScreen Select:focus > SelectCurrent {
+    border: none;
+    background: $panel;
+    color: $primary;
+    text-style: bold;
+}
+
+SettingsScreen SelectOverlay {
+    background: $surface;
+    border: tall $border-subtle;
+    color: $foreground;
+}
+
+/* Compact, restrained Switch styling */
+.sound-control-group {
+    width: 1fr;
+    height: 1;
+    layout: horizontal;
+    align-vertical: middle;
+}
+
+SettingsScreen Switch {
+    border: none;
+    background: $surface;
+    padding: 0 1;
+    height: 1;
+    width: auto;
+}
+
+SettingsScreen Switch:focus {
+    background: $panel;
+}
+
+SettingsScreen Switch > .switch--slider {
+    color: $text-dim;
+    background: $surface;
+}
+
+SettingsScreen Switch.-on > .switch--slider {
+    color: $primary;
+    background: $surface;
+}
+
+#sound-state-label {
+    margin-left: 2;
+    height: 1;
+    color: $foreground;
+}
+
+#settings-feedback {
+    width: 100%;
+    height: 1;
+    margin-top: 0;
+    color: $primary;
+}
+
+#settings-feedback.error {
+    color: $error;
+}
+
+.settings-actions {
+    width: 100%;
+    height: 1;
+    layout: horizontal;
+    margin-top: 1;
+}
+
+SettingsScreen.compact .settings-actions {
+    margin-top: 0;
+}

@@ -1,0 +1,10 @@
+/* POPTRAP Phase 3 — Combined Stylesheet Entrypoint
+ * Preserves backward-compatible `/static/styles/prank.css` loading while
+ * delegating cleanly to the modular Phase 3 stylesheet architecture.
+ */
+
+@import url("./themes.css");
+@import url("./base.css");
+@import url("./animations.css");
+@import url("./effects.css");
+@import url("./responsive.css");

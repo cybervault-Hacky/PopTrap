@@ -1,0 +1,76 @@
+/* POPTRAP Phase 5 — Browser Bluetooth Compatibility Stylesheet */
+
+.bt-compat-wrap {
+  width: min(100%, 44rem);
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.bt-status-grid {
+  display: grid;
+  grid-template-columns: 9rem minmax(0, 1fr);
+  gap: var(--space-2) var(--space-3);
+  margin-top: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+}
+
+.bt-key {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+
+.bt-val {
+  font-size: var(--text-sm);
+  color: var(--fg);
+  word-break: break-word;
+}
+
+.bt-state-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.15rem 0.5rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+
+.bt-limits {
+  margin: var(--space-3) 0 0;
+  padding-left: 1.2rem;
+  color: var(--fg-muted);
+  font-size: var(--text-sm);
+  line-height: 1.55;
+}
+
+.bt-limits li + li {
+  margin-top: var(--space-2);
+}
+
+.bt-feedback {
+  min-height: 1.2rem;
+  margin-top: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--accent);
+}
+
+.bt-feedback.is-error {
+  color: var(--danger);
+}
+
+@media (max-width: 639px) {
+  .bt-status-grid {
+    grid-template-columns: 1fr;
+    gap: var(--space-1);
+  }
+}

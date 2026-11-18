@@ -1,0 +1,16 @@
+# POPTRAP Default Configuration
+# Local application settings loaded at startup and used as safe fallback values.
+
+[app]
+name = "POPTRAP"
+version = "0.1.0"
+
+[ui]
+theme = "cyan-dark"
+default_language = "en"
+
+[audio]
+sound_enabled = false
+
+[logging]
+level = "INFO"
