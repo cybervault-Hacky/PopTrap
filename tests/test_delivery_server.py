@@ -255,12 +255,17 @@ def test_real_lan_listener_requires_opt_in_and_binds_exact_assigned_address():
                 peer = IPv4Address(probe.getsockname()[0])
                 throwaway.accept()[0].close()
         with httpx.Client(trust_env=False, timeout=2) as http:
+            response = http.get(endpoint.origin + "/availability")
+            facts = (
+                f"interface={interface.label} subnet={interface.address.network} "
+                f"kernel-selected peer={peer} host-header={response.request.headers.get('host')!r} "
+                f"authority={endpoint.authority!r} status={response.status_code} body={response.text[:160]!r}"
+            )
             if peer in interface.address.network:
-                assert http.get(endpoint.origin + "/availability").status_code == 200
+                assert response.status_code == 200, facts
             else:
-                refused = http.get(endpoint.origin + "/availability")
-                assert refused.status_code == 403
-                assert "limited to its selected local address and subnet" in refused.text
+                assert response.status_code == 403, facts
+                assert "limited to its selected local address and subnet" in response.text, facts
             with pytest.raises(httpx.ConnectError):
                 http.get(f"http://127.0.0.1:{endpoint.port}/availability")
         with pytest.raises(DeliveryError, match="Stop the current"):

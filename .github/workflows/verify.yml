@@ -28,6 +28,61 @@ jobs:
         run: |
           set -o pipefail
           python tools/verify_install.py --stages structure,hashes,platforms 2>&1 | tee "$RUNNER_TEMP/verify-locks.txt"
+      # The LAN containment test binds a real socket to a real host address, so its
+      # outcome depends on how this runner routes to that address. Record the facts as
+      # a notice annotation, which is readable from the API without fetching job logs.
+      - name: Record runner networking facts for the LAN boundary test
+        run: |
+          set -o pipefail
+          python - <<'PY' | tee "$RUNNER_TEMP/lan-diagnostic.txt"
+          import socket
+          import subprocess
+          from ipaddress import IPv4Address
+
+          import httpx
+
+          from poptrap.engine.delivery.security import list_lan_interfaces
+          from poptrap.engine.delivery.server import DeliveryServer
+
+          interfaces = list_lan_interfaces()
+          for item in interfaces:
+              address = str(item.address.ip)
+              route = subprocess.run(
+                  ["ip", "route", "get", address], capture_output=True, text=True, check=False,
+              ).stdout.strip().replace("\n", " ")
+              with socket.socket() as listener:
+                  listener.bind((address, 0))
+                  listener.listen(1)
+                  with socket.create_connection(listener.getsockname(), timeout=2) as probe:
+                      selected = probe.getsockname()[0]
+                      accepted, _ = listener.accept()
+                      observed = accepted.getpeername()[0]
+                      accepted.close()
+              inside = IPv4Address(observed) in item.address.network
+              print(f"{item.label} | route: {route} | src: {selected} | peer: {observed} | in-subnet: {inside}")
+
+          if interfaces:
+              delivery = DeliveryServer()
+              endpoint = delivery.start(interfaces[0], lan_confirmed=True)
+              try:
+                  with httpx.Client(trust_env=False, timeout=3) as http:
+                      response = http.get(endpoint.origin + "/availability")
+                  print(
+                      f"delivery {endpoint.origin} | host-header: {response.request.headers.get('host')!r} "
+                      f"| authority: {endpoint.authority!r} | status: {response.status_code} "
+                      f"| body: {response.text[:110]!r}"
+                  )
+              finally:
+                  delivery.stop()
+          PY
+          python - <<'PY'
+          import os
+          from pathlib import Path
+
+          text = (Path(os.environ["RUNNER_TEMP"]) / "lan-diagnostic.txt").read_text()
+          text = text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+          print(f"::notice title=LAN boundary facts::{text[:900]}")
+          PY
       - name: Regression tests
         run: |
           set -o pipefail
