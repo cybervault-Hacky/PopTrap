@@ -293,7 +293,7 @@ node --test tests/web/*.mjs        # needs Node.js 22; optional
 python tools/verify_install.py     # full install verification; needs network
 ```
 
-Success looks like: `No broken requirements found.`, then a pytest summary line such as `549 passed, 1 skipped` (the skip is the opt-in networked fresh-install test), then `# pass 50` from Node, then `POPTRAP installation verification: 98/98 passed, 0 warning(s), 0 failure(s).` Counts grow as tests are added; a non-zero failure count or any `FAIL` line is what matters.
+Success looks like: `No broken requirements found.`, then a pytest summary line such as `549 passed, 1 skipped` (the skip is the opt-in networked fresh-install test), then `# pass 50` from Node, then `POPTRAP installation verification: 98/98 passed, 0 warning(s), 0 failure(s).` Counts grow as tests are added; a non-zero failure count or any `FAIL` line is what matters. The GitHub Actions workflow reports `548 passed, 2 skipped` for the same suite: `PyYAML` is not part of the locked test profile, so the workflow-parse test skips there, and the workflow runs the networked fresh-install harness as its own step rather than through pytest.
 
 `requirements.txt` at the repository root lists *ranges*, not the verified profile — it resolves to whatever PyPI publishes today (currently `fastapi 0.165.0` instead of the locked `0.164.0`). Install the locks, not that file.
 

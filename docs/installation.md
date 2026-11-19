@@ -23,6 +23,7 @@ python3 tools/verify_install.py
 | CPython 3.12 / 3.13 / 3.14 | Same probe on `manylinux2014_x86_64` with `--abi cp312`, `cp313`, `cp314`: all 26 pins resolved with hash verification. Dependency level only; the test suite and application were run on 3.11 only. |
 | Android Termux | Same probe with `--platform linux_aarch64` **fails** on `pydantic-core==2.50.4`. See [Android Termux](#android-termux-not-supported). |
 | Uninstall | `pip uninstall -y poptrap` removed the package and console script; the user configuration file remained. |
+| GitHub Actions `ubuntu-latest` | `.github/workflows/verify.yml` ran every gate green on CPython 3.11.18 and Node 22: hash-verified install of `test.lock` + `build.lock`, `pip check`, lock and per-platform wheel verification (`68/68`), `pytest` (`548 passed, 2 skipped`), Node component tests (`50 pass, 0 fail`), reproducible build with `sha256sum -c`, the out-of-checkout wheel smoke test, and the fresh-install stage (`30/30`). Both skips are recorded by the run: the PyYAML workflow-parse test, which is not part of the locked profile, and the pytest wrapper for the networked harness that the workflow runs as its own step. |
 
 ## Verify a candidate bundle
 
