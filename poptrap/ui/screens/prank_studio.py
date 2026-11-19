@@ -937,13 +937,13 @@ class PrankStudioScreen(BasePopTrapScreen):
                 with Vertical(id="studio-preview-panel", classes="hidden"):
                     with Horizontal(classes="session-line"):
                         yield Static("Preview URL", classes="session-key")
-                        yield Static("", classes="session-url", id="val-preview-url")
-                    with Horizontal(classes="session-line"):
-                        yield Static("Web Studio", classes="session-key")
-                        yield Static("", classes="session-val", id="val-studio-url")
+                        yield Static("", classes="session-url", id="val-preview-url", markup=False)
                     with Horizontal(classes="session-line"):
                         yield Static("Status", classes="session-key")
                         yield Static("", classes="session-val", id="val-preview-state")
+
+                yield Button("New Browser Studio link", id="btn-studio-web", classes="action-btn")
+                yield Static("", classes="session-val", id="val-studio-url", markup=False)
 
                 # --- Inline Preset Overwrite Confirmation ---
                 with Horizontal(id="studio-overwrite-bar", classes="confirm-bar hidden"):
@@ -1448,7 +1448,6 @@ class PrankStudioScreen(BasePopTrapScreen):
         self._sync_header(preview_live=live)
 
         self.query_one("#val-preview-url", Static).update(f"{base_url}/s/{snap.session_id}")
-        self.query_one("#val-studio-url", Static).update(f"{base_url}/studio")
         state_txt = f"LOCAL PREVIEW · {snap.state.value.upper()} ({snap.config.duration_seconds}s)"
         if snap.state is SessionState.READY:
             state_txt += " · awaiting consent"
@@ -1505,6 +1504,11 @@ class PrankStudioScreen(BasePopTrapScreen):
             self.action_remove_stage()
         elif bid == "btn-stage-clear":
             self.action_clear_stages()
+        elif bid == "btn-studio-web":
+            try:
+                self._show_editor_link(self.poptrap_app.issue_studio_url())
+            except PopTrapError as exc:
+                self._set_feedback(exc.message, is_error=True)
         elif bid == "btn-studio-preview":
             self.action_start_preview()
         elif bid == "btn-studio-restart":
@@ -1716,18 +1720,24 @@ class PrankStudioScreen(BasePopTrapScreen):
     # Live Local Preview, Preset Saving, & Session Launch
     # ------------------------------------------------------------------
 
+    def _show_editor_link(self, url: str) -> None:
+        self.query_one("#val-studio-url", Static).update(
+            "Browser Studio (private, one use, 90s): " + url
+        )
+
     def action_start_preview(self) -> None:
         try:
             config = self.build_validated_studio_config()
             timeline = build_studio_timeline(
                 config, registry=self.poptrap_app.prank_controller.registry
             )
-            snap, preview_url, _ = self.poptrap_app.launch_studio_preview(config)
+            snap, preview_url, editor_url = self.poptrap_app.launch_studio_preview(config)
         except PopTrapError as exc:
             self._set_feedback(exc.message, is_error=True)
             return
 
         self._preview_session_id = snap.session_id
+        self._show_editor_link(editor_url)
         self._sync_preview_panel()
         self._set_feedback(
             f"Local preview active ({len(timeline)} step(s), {config.effective_duration_seconds}s): {preview_url}",
@@ -1740,7 +1750,7 @@ class PrankStudioScreen(BasePopTrapScreen):
             return
         try:
             config = self.build_validated_studio_config()
-            snap, preview_url, _ = self.poptrap_app.restart_studio_preview(
+            snap, preview_url, editor_url = self.poptrap_app.restart_studio_preview(
                 self._preview_session_id, config
             )
         except PopTrapError as exc:
@@ -1748,6 +1758,7 @@ class PrankStudioScreen(BasePopTrapScreen):
             return
 
         self._preview_session_id = snap.session_id
+        self._show_editor_link(editor_url)
         self._sync_preview_panel()
         self._set_feedback(f"Local preview restarted: {preview_url}", is_error=False)
 

@@ -1,0 +1,36 @@
+/* Shared entry surfaces for invitations, availability, and the local QR helper. */
+.delivery-card section + section:not(.is-hidden),
+.entry-footer {
+  border-top: 1px solid var(--border);
+  margin-top: 1rem;
+  padding-top: 1rem;
+}
+
+.delivery-card label {
+  display: block;
+  margin: 1rem 0 0.35rem;
+  font-weight: 600;
+}
+
+.delivery-card input:not([type="file"]) {
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-control);
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  font-size: 1rem;
+  padding: 0.5rem 0.65rem;
+  min-height: var(--touch-min);
+  width: 100%;
+  margin-bottom: var(--space-3);
+}
+
+.delivery-card :is(input, a):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.delivery-card button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}

@@ -3,7 +3,6 @@
 
 [app]
 name = "POPTRAP"
-version = "0.1.0"
 
 [ui]
 theme = "cyan-dark"

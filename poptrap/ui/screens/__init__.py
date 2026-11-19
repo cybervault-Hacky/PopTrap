@@ -5,6 +5,7 @@ from __future__ import annotations
 from poptrap.ui.screens.base import BasePopTrapScreen
 from poptrap.ui.screens.bluetooth import BluetoothScreen
 from poptrap.ui.screens.create_prank import CreatePrankScreen, PrankPreviewScreen
+from poptrap.ui.screens.delivery import LocalNetworkScreen, ShareLinkScreen
 from poptrap.ui.screens.main_menu import MainMenuScreen
 from poptrap.ui.screens.module_status import ModuleStatusScreen
 from poptrap.ui.screens.prank_studio import PrankStudioScreen, PresetManagerScreen
@@ -14,10 +15,12 @@ __all__ = [
     "BasePopTrapScreen",
     "BluetoothScreen",
     "CreatePrankScreen",
+    "LocalNetworkScreen",
     "MainMenuScreen",
     "ModuleStatusScreen",
     "PrankPreviewScreen",
     "PrankStudioScreen",
     "PresetManagerScreen",
     "SettingsScreen",
+    "ShareLinkScreen",
 ]

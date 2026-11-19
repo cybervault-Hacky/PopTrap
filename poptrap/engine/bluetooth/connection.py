@@ -13,6 +13,7 @@ import select
 import socket
 import struct
 import threading
+import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -43,6 +44,8 @@ from poptrap.engine.bluetooth.models import (
     is_mac_address,
     normalize_device_address,
 )
+
+from poptrap.engine.http_safety import strict_json
 
 FRAME_MAGIC: bytes = b"PTBT1"
 FRAME_HEADER_STRUCT = struct.Struct("!5sH")
@@ -75,9 +78,14 @@ def encode_ack_frame(invitation_id: str, *, status: str = "received") -> bytes:
     return FRAME_HEADER_STRUCT.pack(FRAME_MAGIC, len(body)) + body
 
 
-def _recv_exact(sock: socket.socket, count: int) -> bytes:
+def _recv_exact(sock: socket.socket, count: int, *, deadline: float | None = None) -> bytes:
     chunks = bytearray()
     while len(chunks) < count:
+        if deadline is not None:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("Bluetooth frame deadline reached.")
+            sock.settimeout(remaining)
         chunk = sock.recv(count - len(chunks))
         if not chunk:
             raise BluetoothConnectionError(
@@ -87,9 +95,9 @@ def _recv_exact(sock: socket.socket, count: int) -> bytes:
     return bytes(chunks)
 
 
-def recv_transport_frame(sock: socket.socket, *, max_body: int) -> bytes:
+def recv_transport_frame(sock: socket.socket, *, max_body: int, deadline: float | None = None) -> bytes:
     """Read and validate one length-prefixed ``PTBT1`` frame from ``sock``."""
-    header = _recv_exact(sock, FRAME_HEADER_STRUCT.size)
+    header = _recv_exact(sock, FRAME_HEADER_STRUCT.size, deadline=deadline)
     magic, length = FRAME_HEADER_STRUCT.unpack(header)
     if magic != FRAME_MAGIC:
         raise BluetoothTransportError(
@@ -99,7 +107,7 @@ def recv_transport_frame(sock: socket.socket, *, max_body: int) -> bytes:
         raise BluetoothTransportError(
             f"Peer sent an invalid frame length ({length} bytes; max {max_body})."
         )
-    return _recv_exact(sock, length)
+    return _recv_exact(sock, length, deadline=deadline)
 
 
 def verify_invitation_ack(raw_ack: bytes, *, expected_invitation_id: str) -> bool:
@@ -107,13 +115,13 @@ def verify_invitation_ack(raw_ack: bytes, *, expected_invitation_id: str) -> boo
     if not raw_ack or len(raw_ack) > MAX_ACK_BYTES:
         raise BluetoothTransportError("Invalid Bluetooth invitation acknowledgement size.")
     try:
-        parsed = json.loads(raw_ack.decode("utf-8", errors="strict"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        parsed = strict_json(raw_ack.decode("utf-8", errors="strict"))
+    except (ValueError, RecursionError) as exc:
         raise BluetoothTransportError(
             "Peer returned a malformed invitation acknowledgement."
         ) from exc
-    if not isinstance(parsed, dict):
-        raise BluetoothTransportError("Peer acknowledgement must be a JSON object.")
+    if not isinstance(parsed, dict) or parsed.keys() != {"protocol_version", "ack", "status"}:
+        raise BluetoothTransportError("Peer acknowledgement must be a JSON object with the expected fields.")
     if parsed.get("protocol_version") != INVITATION_PROTOCOL_VERSION:
         raise BluetoothTransportError("Peer acknowledgement protocol version mismatch.")
     if parsed.get("ack") != expected_invitation_id:
@@ -274,7 +282,8 @@ class RfcommSocketTransport(BluetoothTransport):
 
     Confirms connection only when the OS ``connect((address, channel))`` syscall
     completes cleanly, and confirms invitation delivery only when the peer
-    replies with a valid signed-ID acknowledgement frame.
+    replies with a well-formed receipt naming the invitation ID. The receipt
+    is not an application-authenticated acknowledgment.
     """
 
     transport_kind = TransportKind.RFCOMM
@@ -403,9 +412,11 @@ class RfcommSocketTransport(BluetoothTransport):
                     "Cannot send invitation: no active confirmed Bluetooth connection."
                 )
             try:
+                deadline = time.monotonic() + bounded_timeout
                 sock.settimeout(bounded_timeout)
                 sock.sendall(frame)
-                ack_body = recv_transport_frame(sock, max_body=MAX_ACK_BYTES)
+                ack_body = recv_transport_frame(sock, max_body=MAX_ACK_BYTES, deadline=deadline)
+                accepted = verify_invitation_ack(ack_body, expected_invitation_id=invitation_id)
             except (BluetoothConnectionError, BluetoothTransportError):
                 self._mark_closed_locked()
                 raise
@@ -413,9 +424,6 @@ class RfcommSocketTransport(BluetoothTransport):
                 self._mark_closed_locked()
                 raise _classify_socket_error(exc, operation="invitation transfer") from exc
 
-            accepted = verify_invitation_ack(
-                ack_body, expected_invitation_id=invitation_id
-            )
             received_bytes = FRAME_HEADER_STRUCT.size + len(ack_body)
             if not accepted:
                 raise BluetoothTransportError(
@@ -565,9 +573,7 @@ class ConnectionManager:
                 self._disconnected_at = now
                 self._last_checked_at = now
                 self._reason = str(exc)[:320]
-                self._logger.warning(
-                    "Bluetooth connection failed for %s: %s", normalized, exc
-                )
+                self._logger.warning("Bluetooth connection failed (%s).", type(exc).__name__)
                 raise
 
             now = self._iso_now()
@@ -579,8 +585,7 @@ class ConnectionManager:
             self._last_checked_at = now
             self._reason = "Confirmed Bluetooth transport connection active."
             self._logger.info(
-                "Bluetooth connection confirmed: address=%s transport=%s channel=%d",
-                normalized,
+                "Bluetooth connection confirmed: transport=%s channel=%d",
                 transport.transport_kind.value,
                 channel,
             )
@@ -614,11 +619,7 @@ class ConnectionManager:
                         if not adapter_ok
                         else "Connection lost unexpectedly; transport resources cleaned up."
                     )
-                    self._logger.warning(
-                        "Bluetooth connection lost: address=%s reason=%s",
-                        self._device_address,
-                        self._reason,
-                    )
+                    self._logger.warning("Bluetooth connection lost; transport cleaned up.")
             return self._snapshot_locked()
 
     def send_invitation_payload(
@@ -626,6 +627,7 @@ class ConnectionManager:
         invitation_id: str,
         payload: bytes,
         *,
+        expected_address: str,
         timeout: float = DEFAULT_CONNECT_TIMEOUT_SECONDS,
     ) -> ConnectionSnapshot:
         """Send an encoded invitation over the active connection and require peer ACK."""
@@ -637,6 +639,8 @@ class ConnectionManager:
                     hint="Connect to a paired device before sending an invitation.",
                 )
 
+            if status.device_address != normalize_device_address(expected_address):
+                raise BluetoothConnectionError("The confirmed peer changed. Review the target and confirm again.")
             transport = self._transport
             try:
                 sent, received = transport.exchange_invitation(
@@ -691,10 +695,8 @@ class ConnectionManager:
             if address is not None and self._disconnect_hook is not None:
                 try:
                     self._disconnect_hook(address)
-                except Exception as exc:  # noqa: BLE001 - best-effort OS disconnect
-                    self._logger.debug(
-                        "Platform disconnect hook note for %s: %s", address, exc
-                    )
+                except Exception:  # noqa: BLE001 - best-effort OS disconnect
+                    self._logger.debug("Platform disconnect hook returned an advisory error.")
 
             now = self._iso_now()
             if self._state is not ConnectionState.DISCONNECTED:
@@ -705,7 +707,7 @@ class ConnectionManager:
             self._last_checked_at = now
             self._reason = reason[:320]
             if address is not None:
-                self._logger.info("Bluetooth disconnected cleanly: address=%s", address)
+                self._logger.info("Bluetooth disconnected cleanly.")
             return self._snapshot_locked()
 
     def close(self) -> None:

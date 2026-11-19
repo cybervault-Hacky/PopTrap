@@ -34,6 +34,7 @@ body {
     color var(--dur-base) var(--ease-out);
 }
 
+[hidden],
 .is-hidden {
   display: none !important;
 }
@@ -110,6 +111,62 @@ body {
   align-items: center;
   gap: var(--space-2);
   flex-shrink: 0;
+}
+
+/* Recipient pages scroll normally, with a sticky bar in document flow.
+ * Editor and Bluetooth pages retain their original header layout. */
+.recipient-page {
+  display: flex;
+  flex-direction: column;
+  overflow-x: visible;
+}
+
+.recipient-page .safety-bar {
+  position: sticky;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-areas: "brand tools exit";
+  min-height: 0;
+  padding: calc(var(--space-2) + env(safe-area-inset-top, 0px))
+    max(var(--space-3), env(safe-area-inset-right, 0px))
+    var(--space-2)
+    max(var(--space-3), env(safe-area-inset-left, 0px));
+  background-color: var(--bg);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.recipient-page .safety-brand {
+  grid-area: brand;
+  flex-wrap: wrap;
+}
+
+.recipient-page .safety-controls,
+.recipient-page .safety-bar > .bar-btn-exit {
+  grid-area: exit;
+}
+
+.safety-tools {
+  grid-area: tools;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+/* Keep buttons and button-like links usable even in short, coarse viewports. */
+.recipient-page :is(.bar-btn, .btn, .popup-close) {
+  min-width: var(--touch-min);
+  min-height: var(--touch-min);
+}
+
+.recipient-page .btn {
+  padding-block: var(--space-2);
+  text-align: center;
+  line-height: 1.3;
+  text-decoration: none;
+  overflow-wrap: anywhere;
 }
 
 .timer-badge {
@@ -210,6 +267,16 @@ button {
   width: 100%;
   display: flex;
   flex-direction: column;
+}
+
+.recipient-page .app-main {
+  flex: 1;
+  min-height: 0;
+  padding-top: 0;
+}
+
+.recipient-page .stage-root {
+  min-height: 0;
 }
 
 .view-panel {

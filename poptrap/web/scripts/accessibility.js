@@ -401,7 +401,7 @@
       }
     }
 
-    function announce(message) {
+    function announce(message, disposer) {
       if (typeof message !== "string") {
         return;
       }
@@ -423,6 +423,10 @@
           target.textContent = text;
         }
       }, 30);
+      if (disposer) {
+        var handle = pendingTimer;
+        disposer.add(function () { if (pendingTimer === handle) reset(); });
+      }
     }
 
     function reset() {
@@ -476,8 +480,8 @@
     isPageHidden: function () {
       return sharedVisibility.isHidden();
     },
-    announce: function (message) {
-      sharedAnnouncer.announce(message);
+    announce: function (message, disposer) {
+      sharedAnnouncer.announce(message, disposer);
     },
     resetAll: function () {
       sharedAnnouncer.reset();

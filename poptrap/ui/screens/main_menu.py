@@ -7,6 +7,7 @@ from textual.binding import Binding
 from textual.containers import Container, Vertical
 from textual.widgets import Static
 
+from poptrap import __version__
 from poptrap.core.i18n import t
 from poptrap.core.modules import MAIN_MENU_MODULES
 from poptrap.ui.screens.base import BasePopTrapScreen
@@ -35,7 +36,7 @@ class MainMenuScreen(BasePopTrapScreen):
             with Vertical(classes="content-frame menu-frame"):
                 yield BrandHeader(
                     cfg.app.name,
-                    cfg.app.version,
+                    __version__,
                     unicode_enabled=unicode_ok,
                     id="brand-header",
                 )
@@ -82,6 +83,7 @@ class MainMenuScreen(BasePopTrapScreen):
             (arrows, t("keys.navigate", lang)),
             ("Enter", t("keys.select", lang)),
             ("1-6", t("keys.jump", lang)),
+            ("Ctrl+D", "Control Center"),
             ("Q", t("keys.exit", lang)),
         ]
 
@@ -113,7 +115,7 @@ class MainMenuScreen(BasePopTrapScreen):
 
         self.query_one(BrandHeader).update_branding(
             cfg.app.name,
-            cfg.app.version,
+            __version__,
             unicode_enabled=unicode_ok,
         )
         self.query_one(MainMenuList).update_language(cfg.ui.default_language)

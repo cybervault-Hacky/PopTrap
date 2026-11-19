@@ -1,0 +1,21 @@
+/* Terminal handoff to the creator-only browser workspace. */
+#creator-launcher {
+    padding: 0 1;
+    max-height: 100%;
+}
+#creator-url {
+    color: $primary;
+    padding: 1 0;
+    height: auto;
+}
+#creator-launcher Button {
+    width: 100%;
+    margin: 0 0 1 0;
+}
+Screen.compact #creator-launcher Button {
+    margin-bottom: 0;
+}
+#creator-feedback {
+    color: $text-dim;
+    height: auto;
+}

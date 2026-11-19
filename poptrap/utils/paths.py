@@ -8,6 +8,7 @@ and isolated testing.
 from __future__ import annotations
 
 import os
+import stat
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -16,7 +17,7 @@ from poptrap.utils.platform import OperatingSystem, detect_platform
 APP_DIR_SLUG: str = "poptrap"
 CONFIG_FILENAME: str = "config.toml"
 PRESETS_DIRNAME: str = "presets"
-DEFAULT_CONFIG_RELATIVE: tuple[str, str] = ("config", "default.toml")
+DEFAULT_CONFIG_RELATIVE = ("poptrap", "data", "default.toml")
 LOG_FILENAME: str = "poptrap.log"
 
 ENV_CONFIG_DIR: str = "POPTRAP_CONFIG_DIR"
@@ -30,7 +31,7 @@ def get_project_root() -> Path:
 
 
 def get_default_config_path(project_root: Path | None = None) -> Path:
-    """Return the path to the bundled ``config/default.toml`` file."""
+    """Use the same bundled defaults in a checkout and an installed wheel."""
     base = get_project_root() if project_root is None else project_root
     return base.joinpath(*DEFAULT_CONFIG_RELATIVE)
 
@@ -147,14 +148,7 @@ def get_log_file_path(
 
 def ensure_private_directory(path: Path) -> Path:
     """Create ``path`` if absent, restricting permissions to the current user on POSIX."""
-    created = not path.exists()
-    path.mkdir(parents=True, exist_ok=True)
-    if created and os.name == "posix":
-        try:
-            path.chmod(0o700)
-        except OSError:
-            # Filesystems such as shared mounts or Android external storage may ignore chmod.
-            pass
+    path.mkdir(mode=0o700, parents=True, exist_ok=True)
     return path
 
 
@@ -170,3 +164,23 @@ def format_display_path(path: Path, *, home: Path | None = None) -> str:
         return "~"
     sep = "\\" if os.name == "nt" else "/"
     return f"~{sep}{rel_str}"
+
+
+def read_bounded_file(path: Path, limit: int, *, follow_symlinks: bool = True) -> bytes:
+    """Read only a regular file, bounding growth and avoiding waits on FIFOs."""
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NONBLOCK", 0)
+    if not follow_symlinks:
+        if path.is_symlink():
+            raise OSError("Symbolic links are not allowed.")
+        flags |= getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(path, flags)
+    with os.fdopen(fd, "rb") as handle:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode):
+            raise OSError("Expected a regular file.")
+        if info.st_size > limit:
+            raise OSError(f"File exceeds {limit} bytes.")
+        data = handle.read(limit + 1)
+        if len(data) > limit:
+            raise OSError(f"File exceeds {limit} bytes.")
+        return data

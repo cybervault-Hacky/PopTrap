@@ -166,7 +166,6 @@
       durationMs: stage.durationMs,
       mode: "raf",
       reducedIntervalMs: 200,
-      hiddenIntervalMs: 420,
       onTick: function (tState) {
         var pct = Math.min(100, Math.round(tState.ratio * 100));
         core.setScaleX(fill, tState.ratio);
@@ -291,14 +290,13 @@
         }
       }
 
-      if (a11y) {
-        a11y.announce(
-          "Stage " + (index + 1) + " of " + stages.length + ": " + stage.label + "."
-        );
-      }
-
       var childDisposer = core.createDisposer();
       activeStageDisposer = childDisposer;
+      if (a11y) {
+        a11y.announce(
+          "Stage " + (index + 1) + " of " + stages.length + ": " + stage.label + ".", childDisposer
+        );
+      }
       var advanced = false;
 
       function advance() {

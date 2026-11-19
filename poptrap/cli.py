@@ -13,11 +13,13 @@ from poptrap.core.environment import (
     check_environment,
     enforce_environment,
 )
-from poptrap.core.exceptions import EnvironmentCheckError, PopTrapError
+from poptrap.core.exceptions import ConfigurationError, EnvironmentCheckError, PopTrapError
+from poptrap.utils.paths import get_default_config_path, get_log_file_path, get_user_config_path
 
 EXIT_OK: int = 0
 EXIT_RUNTIME_ERROR: int = 1
 EXIT_ENVIRONMENT_ERROR: int = 2
+EXIT_CONFIG_ERROR: int = 3
 EXIT_INTERRUPTED: int = 130
 
 
@@ -25,7 +27,7 @@ def build_parser() -> argparse.ArgumentParser:
     """Create the POPTRAP command-line argument parser."""
     parser = argparse.ArgumentParser(
         prog="poptrap",
-        description="POPTRAP — cross-platform terminal-first prank experience platform.",
+        description="POPTRAP — local, consent-first browser simulations from your terminal.",
     )
     parser.add_argument(
         "-c",
@@ -35,16 +37,27 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="PATH",
         help="Path to a local TOML configuration file.",
     )
-    parser.add_argument(
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument(
         "--check",
         action="store_true",
-        help="Validate configuration and runtime environment, then exit.",
+        help="Report environment readiness and configuration warnings without writing files.",
     )
-    parser.add_argument(
+    mode.add_argument(
+        "--validate-config",
+        action="store_true",
+        help="Strictly validate the selected configuration, without starting the app or writing files.",
+    )
+    mode.add_argument(
+        "--init-config",
+        action="store_true",
+        help="Create a new user configuration from bundled defaults; never overwrite an existing file.",
+    )
+    mode.add_argument(
         "-v",
         "--version",
         action="store_true",
-        help="Show application name and version, then exit.",
+        help="Show the installed program version, then exit.",
     )
     return parser
 
@@ -84,7 +97,6 @@ def _render_check_report(
     report: EnvironmentReport,
     *,
     app_name: str,
-    app_version: str,
     config_path: Path,
     log_path: Path | None,
     config_warnings: Sequence[str],
@@ -98,7 +110,7 @@ def _render_check_report(
 
     title = Text()
     title.append(app_name.upper(), style="bold cyan")
-    title.append(f"  v{app_version}", style="dim")
+    title.append(f"  v{__version__}", style="dim")
     console.print(title)
     console.print(Text("─" * 56, style="bright_black"))
 
@@ -112,10 +124,10 @@ def _render_check_report(
     py_status = "OK" if report.python_ok else f"UNSUPPORTED (requires {report.required_python}+)"
     py_style = "cyan" if report.python_ok else "red"
     grid.add_row("Python", Text(f"{report.python_version} ({py_status})", style=py_style))
-    grid.add_row("Platform", f"{pinfo.system_name} {pinfo.release} ({pinfo.architecture})")
+    grid.add_row("Platform", Text(f"{pinfo.system_name} {pinfo.release} ({pinfo.architecture})"))
     grid.add_row(
         "Terminal",
-        f"{term.term} · {term.columns}x{term.rows} · {term.encoding} · color={term.color_depth.value}",
+        Text(f"{term.term} · {term.columns}x{term.rows} · {term.encoding} · color={term.color_depth.value}"),
     )
     grid.add_row(
         "Interactive TUI",
@@ -133,8 +145,8 @@ def _render_check_report(
             Text(f"{dep_label} ({dep_state})", style="white" if dep.ok else "red"),
         )
 
-    grid.add_row("Config File", str(config_path))
-    grid.add_row("Log File", str(log_path) if log_path is not None else "disabled")
+    grid.add_row("Config File", Text(str(config_path)))
+    grid.add_row("Log File", Text(str(log_path) if log_path is not None else "disabled"))
     console.print(grid)
 
     all_warnings = [*config_warnings, *report.warnings]
@@ -155,64 +167,62 @@ def _render_check_report(
             console.print(line)
 
 
+def _configure(path: Path | None, *, initialize: bool) -> int:
+    """Handle explicit initialization or validation without starting app services."""
+    from poptrap.core.config import load_config, load_default_config, save_config
+
+    try:
+        target = get_user_config_path() if path is None else path.expanduser()
+        if initialize:
+            saved = save_config(load_default_config(strict=True), target, overwrite=False)
+            print(f"Created user configuration: {saved}")
+        elif path is None and not target.exists() and not target.is_symlink():
+            load_default_config(strict=True)
+            print("Bundled defaults are valid. No user configuration has been saved.")
+        else:
+            # Explicitly require the packaged defaults, even if they are missing.
+            load_config(target, default_path=get_default_config_path(), strict=True)
+            print("Configuration is valid.")
+    except (ConfigurationError, OSError, RuntimeError) as exc:
+        _print_error(exc if isinstance(exc, ConfigurationError) else str(exc))
+        return EXIT_CONFIG_ERROR
+    return EXIT_OK
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Execute the POPTRAP startup lifecycle and return a process exit code."""
     parser = build_parser()
     args = parser.parse_args(list(argv) if argv is not None else None)
 
-    if args.version and args.config is None:
-        # Fast path when no custom configuration file was provided; still verify
-        # default.toml if dependencies are present so configured name/version show.
-        try:
-            from rich.console import Console
-
-            from poptrap.core.config import load_config
-
-            cfg = load_config().config
-            Console(highlight=False).print(
-                f"[bold cyan]{cfg.app.name}[/bold cyan] {cfg.app.version}"
-            )
-        except Exception:  # noqa: BLE001
-            sys.stdout.write(f"{APP_NAME} {__version__}\n")
+    if args.version:
+        # A user preference file (or a missing dependency) cannot change the
+        # installed version. Keep this suitable for scripts and support reports.
+        print(f"{APP_NAME} {__version__}")
         return EXIT_OK
 
-    # 1. Verify runtime environment (Python version, dependencies, platform, terminal).
-    require_interactive = not (args.check or args.version)
-    env_report = check_environment(require_interactive=require_interactive)
-
-    if not args.check:
-        try:
-            enforce_environment(env_report, require_tui=require_interactive)
-        except EnvironmentCheckError as exc:
-            _print_error(exc)
-            return EXIT_ENVIRONMENT_ERROR
-    elif not env_report.core_ok:
-        # In --check mode, report missing Python/dependencies clearly without crashing.
-        for err in env_report.errors:
-            _print_error(
-                err,
-                hint="Install Python 3.11+ and run 'pip install -r requirements.txt'.",
-            )
+    interactive = not (args.check or args.init_config or args.validate_config)
+    env_report = check_environment(require_interactive=interactive)
+    try:
+        enforce_environment(env_report, require_tui=interactive)
+    except EnvironmentCheckError as exc:
+        _print_error(exc)
         return EXIT_ENVIRONMENT_ERROR
 
-    # 2. Load and validate configuration (gracefully handles missing/malformed/invalid files).
+    if args.init_config or args.validate_config:
+        return _configure(args.config, initialize=args.init_config)
+
     from poptrap.core.config import load_config
-    from poptrap.core.logging_setup import (
-        configure_logging,
-        get_logger,
-        shutdown_logging,
-    )
 
     config_result = load_config(args.config)
     cfg = config_result.config
-
-    if args.version:
-        from rich.console import Console
-
-        Console(highlight=False).print(
-            f"[bold cyan]{cfg.app.name}[/bold cyan] {cfg.app.version}"
+    if args.check:
+        _render_check_report(
+            env_report, app_name=cfg.app.name, config_path=config_result.config_path,
+            log_path=get_log_file_path(), config_warnings=config_result.warnings,
         )
         return EXIT_OK
+
+    from poptrap.core.logging_setup import configure_logging, get_logger, shutdown_logging
 
     # 3. Initialize local logging subsystem.
     log_state = configure_logging(cfg.logging.level)
@@ -222,7 +232,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         logger.info(
             "Initializing %s v%s on %s %s (%s, Python %s)",
             cfg.app.name,
-            cfg.app.version,
+            __version__,
             env_report.platform.system_name,
             env_report.platform.release,
             env_report.platform.architecture,
@@ -230,21 +240,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         if log_state.warning:
             logger.warning("%s", log_state.warning)
-        for warning in config_result.warnings:
-            logger.warning("Configuration: %s", warning)
-        for warning in env_report.warnings:
-            logger.warning("Environment: %s", warning)
-
-        if args.check:
-            _render_check_report(
-                env_report,
-                app_name=cfg.app.name,
-                app_version=cfg.app.version,
-                config_path=config_result.config_path,
-                log_path=log_state.log_path,
-                config_warnings=config_result.warnings,
-            )
-            return EXIT_OK if env_report.core_ok else EXIT_ENVIRONMENT_ERROR
+        if config_result.warnings:
+            logger.warning("Configuration produced %d notice(s). Run --check for details.", len(config_result.warnings))
+        if env_report.warnings:
+            logger.warning("Environment produced %d notice(s). Run --check for details.", len(env_report.warnings))
 
         # 4 & 5. Launch the interactive POPTRAP terminal interface with branding.
         from poptrap.app import PopTrapApp
@@ -263,18 +262,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         logger.info("Interrupted by user signal; shutting down cleanly.")
         return EXIT_INTERRUPTED
     except PopTrapError as exc:
-        logger.error("Application error: %s", exc.message)
+        logger.error("Application error (%s).", type(exc).__name__)
         _print_error(exc)
         return EXIT_RUNTIME_ERROR
     except Exception as exc:  # noqa: BLE001
-        logger.exception("Unhandled fatal error during execution")
+        logger.error("Unhandled application error (%s).", type(exc).__name__)
         _print_error(
             f"Unexpected runtime error ({type(exc).__name__}): {exc}",
-            hint=(
-                f"Inspect log file '{log_state.log_path}' for details."
-                if log_state.log_path
-                else "Re-run with 'python poptrap.py --check' to verify the environment."
-            ),
+            hint="Run 'poptrap --check' to verify the environment.",
         )
         return EXIT_RUNTIME_ERROR
     finally:

@@ -278,6 +278,7 @@
       isDesktop: width >= 1024,
       isLandscapeShort: width > height && height <= 520,
       isTouch: isTouch,
+      isConstrained: isTouch || width < 640 || height <= 520,
     };
   }
 
@@ -520,9 +521,8 @@
 
   /* ----------------------------------------------------------------
    * Adaptive Wall-Clock Timeline Runner
-   * Uses requestAnimationFrame only for visible full-motion animations,
-   * automatically shifting to low-frequency timers in reduced-motion or
-   * background tabs without losing wall-clock session accuracy.
+   * Pace DOM updates independently of the display refresh rate. CSS handles
+   * interpolation between ticks; hidden views do no timeline rendering.
    * ---------------------------------------------------------------- */
   function createTimeline(disposer, options) {
     var opts = options && typeof options === "object" ? options : {};
@@ -530,7 +530,7 @@
     var useRaf = opts.mode !== "interval";
     var intervalMs = safeInt(opts.intervalMs, 50, 2000, 120);
     var reducedIntervalMs = safeInt(opts.reducedIntervalMs, 100, 2000, 220);
-    var hiddenIntervalMs = safeInt(opts.hiddenIntervalMs, 200, 2000, 450);
+    var fullMotionIntervalMs = getViewportInfo().isConstrained ? 50 : 34;
     var onTick = typeof opts.onTick === "function" ? opts.onTick : function () {};
     var onComplete =
       typeof opts.onComplete === "function" ? opts.onComplete : function () {};
@@ -552,38 +552,19 @@
       }
     }
 
-    function shouldUseRaf() {
-      if (!useRaf) {
-        return false;
-      }
-      if (a11y && (a11y.isReducedMotion() || a11y.isPageHidden())) {
-        return false;
-      }
-      return true;
-    }
-
-    function nextDelay(remainingMs) {
-      var base = intervalMs;
-      if (a11y && a11y.isPageHidden()) {
-        base = hiddenIntervalMs;
-      } else if (a11y && a11y.isReducedMotion()) {
-        base = reducedIntervalMs;
-      }
-      return Math.max(16, Math.min(base, Math.ceil(remainingMs)));
+    function isHidden() {
+      return a11y && a11y.isPageHidden();
     }
 
     function step() {
       activeFrame = null;
       activeTimer = null;
-      if (completed || disposer.isDisposed()) {
-        return;
-      }
+      if (completed || disposer.isDisposed() || isHidden()) return;
 
       var elapsedMs = Math.max(0, nowMs() - startedAt);
       var ratio = clamp(elapsedMs / durationMs, 0, 1);
       var remainingMs = Math.max(0, durationMs - elapsedMs);
       var reduced = a11y ? a11y.isReducedMotion() : false;
-      var hidden = a11y ? a11y.isPageHidden() : false;
 
       onTick({
         elapsedMs: Math.min(elapsedMs, durationMs),
@@ -591,7 +572,7 @@
         durationMs: durationMs,
         ratio: ratio,
         reducedMotion: reduced,
-        hidden: hidden,
+        hidden: false,
       });
 
       if (completed || disposer.isDisposed()) {
@@ -609,34 +590,27 @@
     }
 
     function scheduleNext(remainingMs) {
-      cancelPending();
-      if (completed || disposer.isDisposed()) {
-        return;
-      }
-      if (shouldUseRaf()) {
-        activeFrame = disposer.requestFrame(step);
-      } else {
-        activeTimer = disposer.setTimeout(step, nextDelay(remainingMs));
-      }
+      if (completed || disposer.isDisposed() || isHidden()) return;
+      var reduced = a11y && a11y.isReducedMotion();
+      var base = reduced ? reducedIntervalMs : useRaf ? fullMotionIntervalMs : intervalMs;
+      activeTimer = disposer.setTimeout(function () {
+        activeTimer = null;
+        if (isHidden()) return;
+        if (useRaf && !reduced && remainingMs > base) activeFrame = disposer.requestFrame(step);
+        else step();
+      }, Math.max(16, Math.min(base, Math.ceil(remainingMs))));
     }
 
     function reschedule() {
-      if (completed || disposer.isDisposed()) {
-        return;
-      }
-      var remainingMs = Math.max(0, durationMs - (nowMs() - startedAt));
-      if (remainingMs <= 0) {
-        step();
-        return;
-      }
-      /* Immediately notify when regaining visibility so readouts snap up to date */
-      if (a11y && !a11y.isPageHidden()) {
-        step();
-      } else {
-        scheduleNext(remainingMs);
-      }
+      cancelPending();
+      step();
     }
 
+    if (useRaf) {
+      disposer.listen(global, "resize", function () {
+        fullMotionIntervalMs = getViewportInfo().isConstrained ? 50 : 34;
+      });
+    }
     if (a11y) {
       disposer.add(a11y.motion.onChange(reschedule));
       disposer.add(a11y.visibility.onChange(reschedule));

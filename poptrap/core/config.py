@@ -26,11 +26,14 @@ from poptrap.utils.paths import (
     ensure_private_directory,
     get_default_config_path,
     get_user_config_path,
+    read_bounded_file,
 )
+
+MAX_CONFIG_BYTES = 64 * 1024
 
 _SEMVER_RE = re.compile(
     r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)"
-    r"(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?"
+    r"(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*|(?:a|b|rc)(?:0|[1-9]\d*))?"
     r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$"
 )
 
@@ -68,6 +71,8 @@ class AppSection(BaseModel):
     model_config = ConfigDict(extra="forbid", validate_assignment=True)
 
     name: str = Field(default=APP_NAME, min_length=1, max_length=32)
+    # Retain the legacy TOML field for round-tripping older preferences. It
+    # does not define the version of the installed program.
     version: str = Field(default=__version__, min_length=5, max_length=32)
 
     @field_validator("name", mode="before")
@@ -88,7 +93,7 @@ class AppSection(BaseModel):
         if not isinstance(value, str):
             raise ValueError("Application version must be a semantic version string.")
         cleaned = value.strip()
-        if not _SEMVER_RE.match(cleaned):
+        if not _SEMVER_RE.fullmatch(cleaned):
             raise ValueError(
                 "Application version must follow semantic versioning (for example '0.1.0')."
             )
@@ -158,12 +163,12 @@ class AppConfig(BaseModel):
     logging: LoggingSection = Field(default_factory=LoggingSection)
 
     def to_toml_dict(self) -> dict[str, dict[str, Any]]:
-        """Serialize configuration to plain TOML-compatible primitives."""
+        """Serialize preferences, retaining an explicitly provided legacy version."""
+        app = {"name": self.app.name}
+        if "version" in self.app.model_fields_set:
+            app["version"] = self.app.version
         return {
-            "app": {
-                "name": self.app.name,
-                "version": self.app.version,
-            },
+            "app": app,
             "ui": {
                 "theme": self.ui.theme.value,
                 "default_language": self.ui.default_language.value,
@@ -244,7 +249,7 @@ def parse_toml_file(path: Path) -> dict[str, Any]:
         )
 
     try:
-        raw_bytes = path.read_bytes()
+        raw_bytes = read_bounded_file(path, MAX_CONFIG_BYTES)
     except OSError as exc:
         raise ConfigFormatError(
             f"Cannot read configuration file '{path}': {exc}",
@@ -264,7 +269,7 @@ def parse_toml_file(path: Path) -> dict[str, Any]:
 
     try:
         parsed = tomllib.loads(text)
-    except tomllib.TOMLDecodeError as exc:
+    except (ValueError, RecursionError) as exc:
         raise ConfigFormatError(
             f"Malformed TOML syntax in '{path}': {exc}",
             path=path,
@@ -369,7 +374,7 @@ def _merge_with_fallback(
                 validated_section = section_model.model_validate(trial_section)
             except ValidationError as exc:
                 first_msg = exc.errors()[0].get("msg", "invalid value") if exc.errors() else "invalid value"
-                fallback_val = candidate[section_name][field_name]
+                fallback_val = getattr(getattr(base, section_name), field_name)
                 warnings.append(
                     f"{source_label}: invalid '{section_name}.{field_name}' ({first_msg}); "
                     f"using '{fallback_val}'."
@@ -389,7 +394,7 @@ def load_default_config(
     *,
     strict: bool = False,
 ) -> AppConfig:
-    """Load the default configuration from ``config/default.toml`` with safe fallback."""
+    """Load the default configuration from ``poptrap/data/default.toml`` with safe fallback."""
     target = get_default_config_path() if default_path is None else default_path
     if strict:
         parsed = parse_toml_file(target)
@@ -503,28 +508,37 @@ def load_config(
     )
 
 
-def save_config(config: AppConfig, path: Path | None = None) -> Path:
+def save_config(config: AppConfig, path: Path | None = None, *, overwrite: bool = True) -> Path:
     """Validate and atomically write ``config`` as TOML to ``path``.
+
+    With ``overwrite=False``, publish only to a previously unused path. On
+    POSIX this requires hard-link support in the destination directory. An
+    existing name (including a dangling symlink) is never replaced.
 
     Raises:
         ConfigValidationError: If ``config`` fails validation.
-        ConfigSaveError: If directory creation or atomic file replacement fails.
+        ConfigSaveError: If directory creation or atomic publication fails.
     """
     validated = validate_config_data(config.to_toml_dict(), source_path=path)
     target = (get_user_config_path() if path is None else path).expanduser()
-
-    if target.exists() and target.is_dir():
-        raise ConfigSaveError(
-            f"Cannot write configuration because '{target}' is a directory.",
-            path=target,
-            hint="Choose a valid .toml file path.",
-        )
 
     header = "# POPTRAP Local Configuration\n\n"
     serialized = header + tomli_w.dumps(validated.to_toml_dict())
 
     temp_path: Path | None = None
     try:
+        if target.resolve() == get_default_config_path().resolve():
+            raise ConfigSaveError(
+                "Bundled defaults are read-only.",
+                path=target,
+                hint="Omit --config or choose a path outside the installation.",
+            )
+        if target.is_dir():
+            raise ConfigSaveError(
+                f"Cannot write configuration because '{target}' is a directory.",
+                path=target,
+                hint="Choose a valid .toml file path.",
+            )
         ensure_private_directory(target.parent)
         fd, raw_temp = tempfile.mkstemp(
             prefix=f".{target.name}.",
@@ -532,24 +546,31 @@ def save_config(config: AppConfig, path: Path | None = None) -> Path:
             dir=str(target.parent),
         )
         temp_path = Path(raw_temp)
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
-                handle.write(serialized)
-                handle.flush()
-                os.fsync(handle.fileno())
-        except Exception:
-            # fdopen owns and closes fd once constructed; temp file cleaned below.
-            raise
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(serialized)
+            handle.flush()
+            if os.name == "posix":
+                os.fchmod(handle.fileno(), 0o600)
+            os.fsync(handle.fileno())
 
-        if os.name == "posix":
+        if overwrite:
+            os.replace(temp_path, target)
+            temp_path = None
+        else:
             try:
-                temp_path.chmod(0o600)
-            except OSError:
-                pass
-
-        os.replace(temp_path, target)
-        temp_path = None
-    except OSError as exc:
+                if os.name == "nt":
+                    # Windows rename, unlike POSIX rename, never replaces a file.
+                    os.rename(temp_path, target)
+                    temp_path = None
+                else:
+                    os.link(temp_path, target)
+            except FileExistsError as exc:
+                raise ConfigSaveError(
+                    f"Configuration already exists at '{target}'; left unchanged.",
+                    path=target,
+                    hint="Use --validate-config to check it or choose a new path.",
+                ) from exc
+    except (OSError, RuntimeError) as exc:
         raise ConfigSaveError(
             f"Failed to save configuration to '{target}': {exc}",
             path=target,

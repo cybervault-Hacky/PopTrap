@@ -271,6 +271,10 @@ function createHarness({ reducedMotion = false, width = 1280, height = 800, fetc
   addEl("div", "sr-announcer");
   if (studioDom) {
     const studioIds = [
+      ["p", "studio-access"],
+      ["div", "studio-actions", "is-hidden"],
+      ["div", "studio-workspace", "is-hidden"],
+      ["button", "btn-studio-lock"],
       ["div", "studio-banner", "studio-banner is-hidden"],
       ["span", "studio-banner-text"],
       ["div", "studio-banner-actions"],
@@ -356,7 +360,10 @@ function createHarness({ reducedMotion = false, width = 1280, height = 800, fetc
     document: doc,
     innerWidth: width,
     innerHeight: height,
-    location: { protocol: "http:", host: "127.0.0.1:49152", pathname: studioDom ? "/studio" : "/" },
+    location: { protocol: "http:", host: "127.0.0.1:49152", pathname: studioDom ? "/studio" : "/",
+      hash: studioDom ? "#ticket=" + "a".repeat(42) + "A" : "" },
+    history: { replaceState() { sandbox.location.hash = ""; } },
+    AbortController,
     performance: { now: () => now },
     Date: { now: () => now },
     Object,
@@ -765,6 +772,12 @@ test("Browser Prank Studio manages templates, stages, live preview, and local pr
     const method = opts.method || "GET";
     const body = opts.body ? JSON.parse(opts.body) : null;
 
+    if (url === "/api/v1/studio/unlock") {
+      assert.equal(body.token, "a".repeat(42) + "A");
+      assert.equal(opts.headers.Authorization, undefined);
+      return jsonResp(200, { bearer: "b".repeat(42) + "A" });
+    }
+    assert.equal(opts.headers.Authorization, "Bearer " + "b".repeat(42) + "A");
     if (url === "/api/v1/studio/catalog") return jsonResp(200, sampleCatalog);
     if (url === "/api/v1/studio/presets" && method === "GET") {
       return jsonResp(200, {
@@ -839,6 +852,11 @@ test("Browser Prank Studio manages templates, stages, live preview, and local pr
         preview_path: "/s/" + sid,
       });
     }
+    if (url === "/api/v1/studio/sessions" && method === "POST") {
+      assert.equal(body.auto_start, true);
+      assert.equal(body.consent, undefined);
+      return jsonResp(201, { experience_path: "/s/standalone_ready_0000000" });
+    }
     if (url.endsWith("/stop")) {
       stoppedPreviews.push(url);
       return jsonResp(200, { session: { state: "stopped" } });
@@ -885,6 +903,29 @@ test("Browser Prank Studio manages templates, stages, live preview, and local pr
 
   h.doc.getElementById("btn-preview-return").click();
   assert.equal(h.doc.getElementById("preview-idle").classList.contains("is-hidden"), false);
+
+  // Leaving a running inline preview stops it and returning does not replay.
+  h.doc.getElementById("btn-preview-start").click();
+  await flush();
+  h.doc.hidden = true;
+  h.doc.visibilityState = "hidden";
+  h.doc.dispatchEvent({ type: "visibilitychange" });
+  await flush();
+  assert.equal(stoppedPreviews.length, 2);
+  assert.equal(stageRoot.children.length, 0);
+  assert.equal(h.getActiveRafs(), 0);
+  h.doc.hidden = false;
+  h.doc.visibilityState = "visible";
+  h.doc.dispatchEvent({ type: "visibilitychange" });
+  assert.equal(stageRoot.children.length, 0);
+
+  // Standalone preview is still offered, but opens a separate, unlaunched session.
+  h.doc.getElementById("btn-preview-start").click();
+  await flush();
+  h.doc.getElementById("preview-link-line").children.find((el) => el.textContent === "Prepare standalone run").click();
+  await flush();
+  assert.equal(stageRoot.children.length, 0);
+  assert.match(h.doc.getElementById("studio-banner-actions").textContent, /Open \/s\/standalone_ready/);
 
   // Save preset -> second save prompts inline overwrite confirmation -> confirm overwrites
   h.doc.getElementById("btn-save-preset").click();

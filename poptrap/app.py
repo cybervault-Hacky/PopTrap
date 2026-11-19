@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 from typing import ClassVar
 
 from textual.app import App
 from textual.binding import Binding, BindingType
+from textual.message import Message
 
+from poptrap import __version__
 from poptrap.core.config import (
     AppConfig,
     ConfigLoadResult,
@@ -18,11 +21,15 @@ from poptrap.core.config import (
     load_default_config,
     save_config,
 )
-from poptrap.core.exceptions import ConfigurationError, SessionNotFoundError, SessionStateError
+from poptrap.core.exceptions import ConfigurationError, RuntimeServerError, SessionNotFoundError, SessionStateError
 from poptrap.core.logging_setup import get_logger, set_log_level
 from poptrap.core.modules import ModuleAvailability, ModuleId, get_module_spec
+from poptrap.engine.activity import ActivityLog
 from poptrap.engine.bluetooth import BluetoothEngine
+from poptrap.engine.control.server import ControlServer
+from poptrap.engine.control.service import ControlCenter, Preferences
 from poptrap.engine.controller import PrankController
+from poptrap.engine.delivery.server import DeliveryServer
 from poptrap.engine.lifecycle import is_terminal_state
 from poptrap.engine.models import PrankConfig, SessionSnapshot
 from poptrap.engine.runtime.server import ExperienceServer
@@ -31,10 +38,13 @@ from poptrap.ui.screens import (
     BasePopTrapScreen,
     BluetoothScreen,
     CreatePrankScreen,
+    LocalNetworkScreen,
     MainMenuScreen,
     ModuleStatusScreen,
     SettingsScreen,
+    ShareLinkScreen,
 )
+from poptrap.ui.screens.control import ControlCenterScreen
 from poptrap.ui.themes import POPTRAP_THEMES
 from poptrap.utils.paths import get_default_config_path, get_user_config_path
 from poptrap.utils.platform import (
@@ -43,6 +53,10 @@ from poptrap.utils.platform import (
     detect_platform,
     detect_terminal_capabilities,
 )
+
+
+class ControlPreferencesChanged(Message):
+    """A dashboard worker persisted validated preferences."""
 
 
 class PopTrapApp(App[int]):
@@ -58,11 +72,14 @@ class PopTrapApp(App[int]):
         "ui/styles/create_prank.tcss",
         "ui/styles/prank_studio.tcss",
         "ui/styles/bluetooth.tcss",
+        "ui/styles/delivery.tcss",
+        "ui/styles/control.tcss",
     ]
 
     BINDINGS: ClassVar[list[BindingType]] = [
         Binding("ctrl+c", "request_exit", "Exit", show=False, priority=True),
         Binding("ctrl+q", "request_exit", "Exit", show=False),
+        Binding("ctrl+d", "open_control_center", "Control Center", show=False),
     ]
 
     def __init__(
@@ -81,6 +98,7 @@ class PopTrapApp(App[int]):
     ) -> None:
         super().__init__()
         self._app_logger = get_logger("app")
+        self._config_lock = threading.RLock()
 
         if config_result is not None:
             self._config = config_result.config
@@ -123,6 +141,8 @@ class PopTrapApp(App[int]):
             if experience_server is None
             else experience_server
         )
+        activity = ActivityLog()
+        self._delivery_server = DeliveryServer(registry=self._prank_controller.registry, activity=activity)
         self._owns_bluetooth = bluetooth_engine is None
         self._bluetooth_engine = (
             BluetoothEngine(
@@ -134,6 +154,12 @@ class PopTrapApp(App[int]):
         )
         self._active_session_id: str | None = None
         self._runtime_cleaned = False
+        self._control_center = ControlCenter(
+            self._prank_controller, self._experience_server, self._delivery_server, self._bluetooth_engine, activity,
+            read_config=lambda: self.config, save_preferences=self._save_control_preferences,
+            config_path=self._config_path, default_path=self._default_config_path,
+        )
+        self._control_server = ControlServer(self._control_center)
 
         # Disable decorative transitions to keep navigation crisp and immediate.
         self.animation_level = "none"
@@ -142,7 +168,7 @@ class PopTrapApp(App[int]):
             self.register_theme(custom_theme)
 
         self.title = self._config.app.name
-        self.sub_title = f"v{self._config.app.version}"
+        self.sub_title = f"v{__version__}"
         self.theme = self._config.ui.theme.value
         self._sound_events: int = 0
 
@@ -192,6 +218,11 @@ class PopTrapApp(App[int]):
         return self._experience_server
 
     @property
+    def delivery_server(self) -> DeliveryServer:
+        """Isolated Phase 6 recipient listener; idle until explicitly started."""
+        return self._delivery_server
+
+    @property
     def bluetooth_engine(self) -> BluetoothEngine:
         """Phase 5 Bluetooth capability, discovery, pairing, and invitation engine."""
         return self._bluetooth_engine
@@ -209,7 +240,7 @@ class PopTrapApp(App[int]):
         self._app_logger.info(
             "UI mounted (%s v%s, theme=%s, lang=%s, platform=%s)",
             self._config.app.name,
-            self._config.app.version,
+            __version__,
             self._config.ui.theme.value,
             self._config.ui.default_language.value,
             self._platform_info.os_type.value,
@@ -224,6 +255,18 @@ class PopTrapApp(App[int]):
         if self._config.audio.sound_enabled:
             self._sound_events += 1
             self.bell()
+
+    def issue_control_url(self) -> str:
+        """Access is minted by an explicit terminal action, never by an HTTP route."""
+        if self._runtime_cleaned:
+            raise RuntimeServerError("POPTRAP is shutting down.")
+        return self._control_server.issue_url()
+
+    def action_open_control_center(self) -> None:
+        if isinstance(self.screen, ControlCenterScreen):
+            self.screen.action_new_access_link()
+        else:
+            self.push_screen(ControlCenterScreen())
 
     def open_module(self, module_id: ModuleId) -> None:
         """Route selection of one of the six main menu items."""
@@ -246,6 +289,12 @@ class PopTrapApp(App[int]):
         if spec.module_id is ModuleId.BLUETOOTH:
             self.emit_feedback_sound()
             self.push_screen(BluetoothScreen())
+            return
+
+        if spec.module_id in (ModuleId.QR_SHARE_LINK, ModuleId.LOCAL_NETWORK):
+            self.emit_feedback_sound()
+            screen = ShareLinkScreen() if spec.module_id is ModuleId.QR_SHARE_LINK else LocalNetworkScreen()
+            self.push_screen(screen)
             return
 
         if spec.module_id is ModuleId.SETTINGS:
@@ -281,11 +330,17 @@ class PopTrapApp(App[int]):
         self._active_session_id = started.session_id
         self.emit_feedback_sound()
         self._app_logger.info(
-            "Prank session live: template=%s url=%s",
+            "Prank session ready: template=%s",
             config.template_id.value,
-            url,
         )
         return started, url
+
+    def issue_studio_url(self) -> str:
+        """The terminal can refresh browser editor authorization without starting playback."""
+        if self._runtime_cleaned:
+            raise RuntimeServerError("POPTRAP is shutting down.")
+        self._experience_server.start()
+        return self._experience_server.studio_url()
 
     def launch_studio_session(
         self, studio_config: StudioConfig
@@ -312,11 +367,9 @@ class PopTrapApp(App[int]):
         self._active_session_id = started.session_id
         self.emit_feedback_sound()
         self._app_logger.info(
-            "Studio session live: name=%r template=%s stages=%d url=%s",
-            studio_config.name,
+            "Studio session ready: template=%s stages=%d",
             studio_config.template_id.value,
             len(studio_config.stages),
-            url,
         )
         return started, url
 
@@ -331,9 +384,7 @@ class PopTrapApp(App[int]):
         preview_url = self._experience_server.session_url(snap.session_id)
         studio_url = self._experience_server.studio_url()
         self.emit_feedback_sound()
-        self._app_logger.info(
-            "Studio local preview live: id=%s url=%s", snap.session_id, preview_url
-        )
+        self._app_logger.info("Studio local preview ready.")
         return snap, preview_url, studio_url
 
     def restart_studio_preview(
@@ -389,14 +440,21 @@ class PopTrapApp(App[int]):
             return
         self._runtime_cleaned = True
         try:
-            if self._owns_bluetooth:
-                self._bluetooth_engine.shutdown()
+            self._control_server.stop()
         finally:
+            self._control_center.close()
             try:
-                self._experience_server.stop()
+                self._delivery_server.stop()
             finally:
-                if self._owns_controller:
-                    self._prank_controller.shutdown()
+                try:
+                    if self._owns_bluetooth:
+                        self._bluetooth_engine.shutdown()
+                finally:
+                    try:
+                        self._experience_server.stop()
+                    finally:
+                        if self._owns_controller:
+                            self._prank_controller.shutdown()
 
     def close_active_screen(self) -> None:
         """Return to the previous screen when a sub-screen is open."""
@@ -405,17 +463,49 @@ class PopTrapApp(App[int]):
             self.pop_screen()
             self._app_logger.debug("Closed screen %s", popped)
 
-    def _apply_runtime_config(self, new_config: AppConfig) -> None:
-        """Apply a validated configuration to live UI, theme, and logger state."""
-        self._config = new_config
+    def _apply_runtime_config(self) -> None:
+        """Apply the latest persisted preferences to Textual on its own thread."""
+        new_config = self._config
         self.title = new_config.app.name
-        self.sub_title = f"v{new_config.app.version}"
+        self.sub_title = f"v{__version__}"
         self.theme = new_config.ui.theme.value
         set_log_level(new_config.logging.level)
 
         for screen in self.screen_stack:
             if isinstance(screen, BasePopTrapScreen) and screen.is_mounted:
                 screen.refresh(repaint=True, layout=True)
+
+    def _persist_config(self, updated: AppConfig) -> None:
+        try:
+            save_config(updated, self._config_path)
+        except ConfigurationError:
+            self._app_logger.error("Failed to persist settings.")
+            raise
+        self._config = updated
+        self._config_warnings = ()
+
+    def _persist_preferences(self, preferences: Preferences) -> AppConfig:
+        with self._config_lock:
+            if self._runtime_cleaned:
+                raise ConfigurationError("POPTRAP is shutting down.")
+            updated = self._config.with_preferences(
+                theme=preferences.theme, sound_enabled=preferences.sound,
+                default_language=preferences.language, log_level=preferences.log_level,
+            )
+            self._persist_config(updated)
+            return updated
+
+    def _save_control_preferences(self, preferences: Preferences) -> AppConfig:
+        updated = self._persist_preferences(preferences)
+        # No synchronous wait on the UI thread: it may be closing the server.
+        self.post_message(ControlPreferencesChanged())
+        return updated
+
+    def on_control_preferences_changed(self, _message: ControlPreferencesChanged) -> None:
+        if not self._runtime_cleaned:
+            self._apply_runtime_config()
+            if isinstance(self.screen, MainMenuScreen):
+                self.screen.refresh_from_config()
 
     def update_preferences(
         self,
@@ -426,44 +516,20 @@ class PopTrapApp(App[int]):
         log_level: LogLevel,
     ) -> AppConfig:
         """Validate, persist, and apply updated settings preferences."""
-        updated = self._config.with_preferences(
-            theme=theme,
-            sound_enabled=sound_enabled,
-            default_language=default_language,
-            log_level=log_level,
-        )
-        try:
-            save_config(updated, self._config_path)
-        except ConfigurationError as exc:
-            self._app_logger.error("Failed to persist settings: %s", exc.message)
-            raise
-
-        self._config_warnings = ()
-        self._apply_runtime_config(updated)
+        updated = self._persist_preferences(Preferences(
+            theme=theme, sound=sound_enabled, language=default_language, log_level=log_level,
+        ))
+        self._apply_runtime_config()
         self.emit_feedback_sound()
-        self._app_logger.info(
-            "Settings saved to %s (theme=%s, sound=%s, language=%s, log_level=%s)",
-            self._config_path,
-            updated.ui.theme.value,
-            updated.audio.sound_enabled,
-            updated.ui.default_language.value,
-            updated.logging.level.value,
-        )
         return updated
 
     def reset_preferences(self) -> AppConfig:
         """Restore bundled default configuration, persist it, and apply live."""
-        defaults = load_default_config(self._default_config_path)
-        try:
-            save_config(defaults, self._config_path)
-        except ConfigurationError as exc:
-            self._app_logger.error("Failed to persist default settings: %s", exc.message)
-            raise
-
-        self._config_warnings = ()
-        self._apply_runtime_config(defaults)
+        with self._config_lock:
+            defaults = load_default_config(self._default_config_path)
+            self._persist_config(defaults)
+        self._apply_runtime_config()
         self.emit_feedback_sound()
-        self._app_logger.info("Settings reset to defaults at %s", self._config_path)
         return defaults
 
     def action_request_exit(self) -> None:

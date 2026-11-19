@@ -12,45 +12,45 @@
   <link rel="stylesheet" href="/static/styles/effects.css">
   <link rel="stylesheet" href="/static/styles/responsive.css">
 </head>
-<body>
+<body class="recipient-page">
   <header class="safety-bar" role="banner" aria-label="Simulation safety controls">
     <div class="safety-brand">
       <span class="brand-mark">POPTRAP</span>
       <span id="sim-badge" class="sim-pill">SIMULATION</span>
     </div>
-    <div class="safety-controls">
-      <span id="timer-badge" class="timer-badge is-hidden" aria-live="off" title="Time remaining">00:00</span>
-      <button id="btn-theme" type="button" class="bar-btn bar-btn-subtle bar-btn-theme is-hidden" aria-label="Switch visual theme">Dark</button>
-      <button id="btn-mute" type="button" class="bar-btn bar-btn-subtle is-hidden" aria-pressed="false">Mute</button>
-      <button id="btn-exit" type="button" class="bar-btn bar-btn-exit" aria-label="Exit simulation immediately">Exit</button>
+    <button id="btn-exit" type="button" class="bar-btn bar-btn-exit" aria-label="Exit simulation immediately">Exit</button>
+    <div id="safety-tools" hidden class="safety-tools is-hidden">
+      <span id="timer-badge" hidden class="timer-badge is-hidden" aria-live="off" title="Time remaining">00:00</span>
+      <button id="btn-theme" hidden type="button" class="bar-btn bar-btn-subtle bar-btn-theme is-hidden" aria-label="Switch visual theme">Dark</button>
+      <button id="btn-mute" hidden type="button" class="bar-btn bar-btn-subtle is-hidden" aria-pressed="false">Mute</button>
     </div>
   </header>
 
   <div id="sr-announcer" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
 
   <main id="app-main" class="app-main">
-    <section id="view-consent" class="view-panel is-hidden" aria-labelledby="consent-title">
+    <section id="view-consent" hidden class="view-panel is-hidden" aria-labelledby="consent-title">
       <div class="card">
         <p class="eyebrow">SIMULATION PREVIEW</p>
-        <h1 id="consent-title" class="card-title">Browser Simulation</h1>
+        <h1 id="consent-title" class="card-title" tabindex="-1">Browser Simulation</h1>
         <p id="consent-meta" class="meta-line"></p>
         <p id="consent-note" class="consent-note">
-          Harmless visual prank contained entirely inside this browser tab.
-          No files, settings, or device resources are accessed.
-          Press <strong>Exit</strong> or <strong>Esc</strong> at any time.
+          This visual simulation stays inside this tab. It does not read your files or change device settings.
+          Nothing runs until you choose <strong>Launch Simulation</strong>. Use <strong>Exit</strong> or <strong>Esc</strong> at any time.
+          Leaving the tab ends a running simulation.
         </p>
         <div class="action-row">
-          <button id="btn-start" type="button" class="btn btn-primary">Launch Simulation</button>
+          <button id="btn-start" disabled type="button" class="btn btn-primary">Launch Simulation</button>
           <button id="btn-decline" type="button" class="btn btn-secondary">Exit</button>
         </div>
       </div>
     </section>
 
-    <section id="view-stage" class="view-stage is-hidden" aria-label="Active simulation stage">
+    <section id="view-stage" hidden class="view-stage is-hidden" aria-label="Active simulation stage">
       <div id="stage-root" class="stage-root"></div>
     </section>
 
-    <section id="view-reveal" class="view-panel is-hidden" aria-labelledby="reveal-title">
+    <section id="view-reveal" hidden class="view-panel is-hidden" aria-labelledby="reveal-title">
       <div id="reveal-card" class="card reveal-card">
         <p class="eyebrow">SIMULATION COMPLETE</p>
         <h1 id="reveal-title" class="card-title" tabindex="-1">That was a POPTRAP simulation.</h1>
@@ -63,8 +63,8 @@
     <section id="view-status" class="view-panel" aria-labelledby="status-title">
       <div class="card">
         <p class="eyebrow">POPTRAP RUNTIME</p>
-        <h1 id="status-title" class="card-title">Connecting…</h1>
-        <p id="status-message" class="meta-line">Checking localhost simulation session.</p>
+        <h1 id="status-title" class="card-title" tabindex="-1">Connecting…</h1>
+        <p id="status-message" class="meta-line">Checking the local simulation session.</p>
       </div>
     </section>
   </main>
@@ -77,7 +77,9 @@
   <script src="/static/scripts/effects/glitch.js" defer></script>
   <script src="/static/scripts/effects/sequence.js" defer></script>
   <script src="/static/scripts/effects.js" defer></script>
+  <script src="/static/scripts/document-key.js" defer></script>
   <script src="/static/scripts/controller.js" defer></script>
+  <script src="/static/scripts/delivery.js" defer></script>
   <script src="/static/scripts/runtime.js" defer></script>
 </body>
 </html>

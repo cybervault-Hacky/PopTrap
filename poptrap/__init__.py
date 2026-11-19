@@ -1,12 +1,9 @@
-"""POPTRAP — cross-platform, terminal-first prank experience platform.
-
-Phase 1 provides the core application foundation, configuration subsystem,
-runtime environment verification, logging, and interactive terminal UI.
-"""
+"""POPTRAP's application identity, shared by the CLI, runtime and build."""
 
 from __future__ import annotations
 
+from poptrap._version import __version__ as __version__
+
 APP_NAME: str = "POPTRAP"
-__version__: str = "0.1.0"
 
 __all__ = ["APP_NAME", "__version__"]

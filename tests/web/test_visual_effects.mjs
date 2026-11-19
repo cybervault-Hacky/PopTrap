@@ -14,6 +14,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import vm from "node:vm";
+import { webcrypto } from "node:crypto";
 import { fileURLToPath } from "node:url";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -29,6 +30,7 @@ const SCRIPT_ORDER = [
   "scripts/effects/particles.js",
   "scripts/effects/glitch.js",
   "scripts/effects.js",
+  "scripts/document-key.js",
   "scripts/controller.js",
 ];
 
@@ -517,6 +519,9 @@ function createSandbox(options = {}) {
   const win = new MockEventTarget();
   Object.assign(win, {
     document: doc,
+    AbortController,
+    DOMException,
+    navigator: { onLine: true },
     innerWidth: options.width || 1280,
     innerHeight: options.height || 800,
     location: {
@@ -562,7 +567,7 @@ function createSandbox(options = {}) {
     requestAnimationFrame(fn) {
       const id = nextHandleId++;
       rafScheduledTotal += 1;
-      tasks.set(id, { id, kind: "raf", due: clockMs + 16, fn });
+      tasks.set(id, { id, kind: "raf", due: clockMs + (options.rafInterval || 16), fn });
       return id;
     },
     cancelAnimationFrame(id) {
@@ -572,6 +577,7 @@ function createSandbox(options = {}) {
     matchMedia: getMediaQuery,
     AudioContext: MockAudioContext,
     WebSocket: MockWebSocket,
+    crypto: webcrypto,
     fetch(url, init) {
       securityLog.fetchUrls.push({ url: String(url), method: (init && init.method) || "GET" });
       if (typeof options.fetchHandler === "function") {
@@ -1412,7 +1418,7 @@ test("Controller runs full consent -> simulation -> reveal lifecycle for all 5 t
     // Run to automatic completion -> reveal screen
     sb.advance(6250);
     await flushMicrotasks();
-    // Let celebratory reveal particles and ARIA announcer timer finish naturally
+    // Allow the short ARIA announcement to finish
     sb.advance(1000);
 
     assert.equal(sb.doc.getElementById("view-reveal").classList.contains("is-hidden"), false);
@@ -1570,13 +1576,14 @@ test("Mobile, tablet, landscape, and desktop viewports keep safety controls acti
     assert.equal(sb.doc.getElementById("btn-exit").classList.contains("is-hidden"), false);
 
     const arena = sb.stageRoot.findFirstByClass("storm-arena");
+    const stacked = vp.compact || info.isLandscapeShort;
     assert.equal(
       arena.classList.contains("is-stacked"),
-      vp.compact,
+      stacked,
       `${vp.name} stacked popup layout mismatch`
     );
 
-    if (!vp.compact) {
+    if (!stacked) {
       // Every positioned card stays inside positive in-arena coordinates
       for (const card of sb.stageRoot.findByClass("popup-card")) {
         const x = parseInt(card.style.getPropertyValue("--card-x"), 10);
@@ -1588,5 +1595,153 @@ test("Mobile, tablet, landscape, and desktop viewports keep safety controls acti
 
     controller.destroy();
     assert.equal(sb.getLiveTaskCounts().totalTasks, 0);
+  }
+});
+
+test("Delivery transport cannot revive effects with late consent or poll responses after Exit", async () => {
+  const sb = createSandbox({ pathname: "/play", reducedMotion: true });
+  const ready = {
+    template_id: "glitch", template_name: "Glitch", theme: "dark", state: "ready",
+    title: "Opt-in simulation", duration_seconds: 16, reveal_message: "Fictional effect.",
+  };
+  const active = { session: { ...ready, state: "active", consent_granted: true, remaining_seconds: 16 }, runtime: {} };
+  let resolveStart, update;
+  let watcherStopped = false;
+  const commands = [];
+  const controller = sb.win.PopTrapController.create({
+    request(action) {
+      commands.push(action);
+      if (action === "view") return Promise.resolve({ session: ready });
+      if (action === "consent") return new Promise((resolve) => { resolveStart = resolve; });
+      return Promise.resolve({ session: { ...ready, state: "stopped", is_terminal: true } });
+    },
+    watch(onEnvelope) {
+      update = onEnvelope;
+      return () => { watcherStopped = true; };
+    },
+  });
+  await controller.init();
+  assert.deepEqual(commands, ["view"]);
+  assert.equal(controller.getState().hasSocket, false);
+  sb.doc.getElementById("btn-start").click();
+  sb.doc.getElementById("btn-exit").click();
+  assert.equal(controller.getState().activeView, "reveal");
+  await flushMicrotasks();
+  update(active);
+  resolveStart(active);
+  await flushMicrotasks();
+  assert.deepEqual(commands, ["view", "consent", "exit"]);
+  assert.equal(controller.getState().hasActiveEffect, false);
+  assert.equal(controller.getState().activeView, "reveal");
+  assert.equal(sb.stageRoot.childNodes.length, 0);
+  assert.equal(watcherStopped, true);
+  controller.destroy();
+});
+
+test("a new or restored document cannot inherit an ACTIVE session", async () => {
+  const api = createMockSessionApi("glitch");
+  Object.assign(api.session, { state: "active", consent_granted: true, remaining_seconds: 8 });
+  const sb = createSandbox({ pathname: `/s/${api.sessionId}`, fetchHandler: api.fetchHandler });
+  const controller = sb.win.PopTrapController.create();
+  await controller.init();
+  assert.match(sb.doc.getElementById("status-title").textContent, /already started/);
+  assert.equal(controller.getState().hasActiveEffect, false);
+  assert.equal(sb.stageRoot.childNodes.length, 0);
+  assert.equal(sb.getLiveTaskCounts().openSockets, 0);
+  await controller.startSession();
+  assert.equal(sb.securityLog.fetchUrls.length, 1, "must not stop or replay another document's run");
+  controller.destroy();
+});
+
+for (const interruption of ["hidden", "freeze", "offline", "socket close", "pagehide"]) {
+  test(`active player cleans up on ${interruption} and will not resume`, async () => {
+    const api = createMockSessionApi("countdown", { sound_enabled: true, duration_seconds: 8 });
+    const sb = createSandbox({ width: 390, height: 844, coarsePointer: true,
+      pathname: `/s/${api.sessionId}`, fetchHandler: api.fetchHandler });
+    const controller = sb.win.PopTrapController.create();
+    await controller.init();
+    await controller.startSession();
+    sb.advance(1200);
+    assert.equal(controller.getState().hasActiveEffect, true);
+    assert.equal(sb.audioStats.openContexts, 1);
+    if (interruption === "hidden") sb.setHidden(true);
+    if (interruption === "freeze") sb.doc.dispatchEvent({ type: "freeze" });
+    if (interruption === "offline") {
+      sb.win.navigator.onLine = false;
+      sb.win.dispatchEvent({ type: "offline" });
+    }
+    if (interruption === "socket close") sb.securityLog.openSockets[0].close();
+    if (interruption === "pagehide") controller.leavePage();
+    assert.equal(sb.win.PopTrapEffects.getActiveCount(), 0);
+    assert.equal(sb.audioStats.openContexts, 0);
+    assert.equal(sb.stageRoot.childNodes.length, 0);
+    assert.equal(sb.getLiveTaskCounts().openSockets, 0);
+    assert.equal(controller.getState().activeView, "reveal");
+    sb.win.navigator.onLine = true;
+    sb.win.dispatchEvent({ type: "online" });
+    sb.setHidden(false);
+    sb.win.dispatchEvent({ type: "pageshow", persisted: true });
+    await flushMicrotasks();
+    sb.advance(3000);
+    assert.equal(controller.getState().hasActiveEffect, false);
+    assert.equal(sb.getLiveTaskCounts().totalTasks, 0);
+    assert.equal(sb.securityLog.fetchUrls.filter((f) => f.url.endsWith("/exit")).length, 1);
+    controller.destroy();
+  });
+}
+
+test("no-WebSocket fallback detects a local read failure and cleans up", async () => {
+  const api = createMockSessionApi("glitch");
+  let connected = true;
+  const sb = createSandbox({ pathname: `/s/${api.sessionId}`, fetchHandler(url, init) {
+    if (!connected) return Promise.reject(new Error("Local server no longer reachable"));
+    return api.fetchHandler(url, init);
+  } });
+  sb.win.WebSocket = undefined;
+  const controller = sb.win.PopTrapController.create();
+  await controller.init();
+  await controller.startSession();
+  connected = false;
+  sb.advance(1600);
+  await flushMicrotasks();
+  assert.equal(controller.getState().hasActiveEffect, false);
+  assert.match(sb.doc.getElementById("reveal-summary").textContent, /connection was lost/);
+  controller.destroy();
+  assert.equal(sb.getLiveTaskCounts().totalTasks, 0);
+});
+
+test("pre-consent background return rechecks state without sending Launch", async () => {
+  const api = createMockSessionApi("glitch");
+  const sb = createSandbox({ pathname: `/s/${api.sessionId}`, fetchHandler: api.fetchHandler });
+  const controller = sb.win.PopTrapController.create();
+  await controller.init();
+  sb.setHidden(true);
+  assert.equal(sb.getLiveTaskCounts().openSockets, 0);
+  sb.advance(4000);
+  assert.equal(sb.securityLog.fetchUrls.length, 1);
+  sb.setHidden(false);
+  await flushMicrotasks();
+  assert.equal(controller.getState().activeView, "consent");
+  assert.deepEqual(sb.securityLog.fetchUrls.map((f) => f.method), ["GET", "GET"]);
+  assert.equal(sb.stageRoot.childNodes.length, 0);
+  controller.destroy();
+});
+
+test("all templates cap render scheduling on simulated 144Hz touch and short landscape", () => {
+  for (const id of ["glitch", "virus_alert", "system_crash", "popup_storm", "countdown"]) {
+    const sb = createSandbox({ width: 844, height: 390, coarsePointer: true, rafInterval: 7 });
+    const handle = sb.win.PopTrapEffects.startEffect(id, sb.stageRoot, { duration_seconds: 8, sound_enabled: true });
+    sb.advance(3000);
+    const frames = sb.getRafTotal();
+    assert.ok(id === "popup_storm" ? frames === 0 : frames > 0 && frames <= 60, `${id}: ${frames} RAFs/3s`);
+    sb.setReducedMotion(true);
+    const initial = sb.getRafTotal();
+    sb.advance(1000);
+    assert.equal(sb.getRafTotal(), initial);
+    sb.setHidden(true);
+    assert.equal(sb.getLiveTaskCounts().rafs, 0);
+    handle.stop();
+    assert.equal(sb.getLiveTaskCounts().totalTasks, 0);
+    assert.equal(sb.getLiveTaskCounts().openAudioContexts, 0);
   }
 });

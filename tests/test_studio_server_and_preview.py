@@ -7,16 +7,18 @@ import re
 import shutil
 import subprocess
 import urllib.request
+from urllib.parse import parse_qs, urlsplit
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
+from tests.runtime_http import authorize, runtime_client, runtime_ws
 
 from poptrap.core.exceptions import SessionStateError
 from poptrap.engine.controller import PrankController
 from poptrap.engine.models import PrankTheme, SessionState, TemplateId
 from poptrap.engine.runtime.assets import SECURITY_HEADERS, get_web_root
-from poptrap.engine.runtime.server import ExperienceServer, create_runtime_app
+from poptrap.engine.runtime.security import CreatorAccess
+from poptrap.engine.runtime.server import ExperienceServer
 from poptrap.engine.studio import (
     PresetStore,
     build_default_stages,
@@ -152,8 +154,9 @@ class TestStudioHttpApiAndWebSocket:
         self, studio_env
     ) -> None:
         controller, _ = studio_env
-        app = create_runtime_app(controller)
-        client = TestClient(app)
+        access = CreatorAccess()
+        client = runtime_client(controller, access=access)
+        authorize(client, access)
 
         # GET /studio serves strict-CSP Studio page and all referenced assets exist.
         studio_res = client.get("/studio")
@@ -260,7 +263,7 @@ class TestStudioHttpApiAndWebSocket:
         sid = sess.json()["session"]["session_id"]
         assert client.get(f"/s/{sid}").status_code == 200
 
-        with client.websocket_connect(f"/ws/sessions/{sid}") as ws:
+        with runtime_ws(client, sid) as ws:
             initial = ws.receive_json()
             assert initial["session"]["state"] == "ready"
             assert initial["runtime"] is None
@@ -280,7 +283,9 @@ class TestStudioHttpApiAndWebSocket:
         self, studio_env
     ) -> None:
         controller, _ = studio_env
-        client = TestClient(create_runtime_app(controller))
+        access = CreatorAccess()
+        client = runtime_client(controller, access=access)
+        authorize(client, access)
 
         cfg = build_default_studio_config(
             TemplateId.SYSTEM_CRASH, registry=controller.registry
@@ -368,7 +373,8 @@ class TestStudioHttpApiAndWebSocket:
         try:
             assert base_url.startswith("http://127.0.0.1:")
             studio_url = server.studio_url()
-            assert studio_url == f"{base_url}/studio"
+            assert studio_url.startswith(f"{base_url}/studio#ticket=")
+            assert len(parse_qs(urlsplit(studio_url).fragment)["ticket"][0]) == 43
             with urllib.request.urlopen(studio_url, timeout=3) as resp:
                 assert resp.status == 200
                 html = resp.read().decode("utf-8")
@@ -394,8 +400,10 @@ class TestStudioWebSecurityAndContainment:
         )
         for js_file in sorted(web_root.rglob("*.js")):
             text = js_file.read_text(encoding="utf-8")
-            # Strip comments so SVG namespace declaration is allowed only in effects_manager.js
-            sanitized = text.replace("http://www.w3.org/2000/svg", "")
+            # Ignore URL citations in standalone comments (e.g. the pinned QR
+            # decoder); still scan every executable line in every bundle.
+            sanitized = re.sub(r"^[ \t]*//[^\n]*$", "", text, flags=re.M)
+            sanitized = sanitized.replace("http://www.w3.org/2000/svg", "")
             for pattern in forbidden_js:
                 assert re.search(pattern, sanitized) is None, (
                     f"Forbidden pattern {pattern!r} found in {js_file.name}"

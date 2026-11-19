@@ -236,7 +236,6 @@
       durationMs: config.durationMs,
       mode: "raf",
       reducedIntervalMs: 200,
-      hiddenIntervalMs: 450,
       onTick: function (state) {
         var progress = Math.min(1, state.ratio / revealRatio);
         var pct = Math.min(100, Math.round(progress * 100));
@@ -288,7 +287,7 @@
           if (config.soundEnabled) {
             ctx.sound.playChime();
           }
-          a11y.announce(verdictText);
+          a11y.announce(verdictText, disposer);
         }
       },
       onComplete: function () {
@@ -438,7 +437,6 @@
       durationMs: config.durationMs,
       mode: "raf",
       reducedIntervalMs: 220,
-      hiddenIntervalMs: 450,
       onTick: function (state) {
         if (state.ratio < restartDelay) {
           return;
@@ -449,7 +447,7 @@
           restartBox.classList.remove("is-hidden");
           wrap.classList.add("is-recovering");
           core.setText(phaseChip, "RECOVERING");
-          a11y.announce("Simulated recovery sequence started.");
+          a11y.announce("Simulated recovery sequence started.", disposer);
         }
 
         var recoverySpan = Math.max(0.12, recoveryTarget - restartDelay);
@@ -480,7 +478,7 @@
           if (config.soundEnabled) {
             ctx.sound.playChime();
           }
-          a11y.announce(recoveredStatus);
+          a11y.announce(recoveredStatus, disposer);
         }
       },
       onComplete: function () {
@@ -588,7 +586,7 @@
 
     function getActiveCap() {
       var vp = core.getViewportInfo();
-      var hardCap = vp.isCompact
+      var hardCap = vp.isConstrained
         ? core.LIMITS.MAX_SIMULTANEOUS_POPUPS_COMPACT
         : core.LIMITS.MAX_SIMULTANEOUS_POPUPS;
       return Math.max(1, Math.min(totalTarget, rawMaxActive, hardCap));
@@ -630,34 +628,28 @@
       return { x: x, y: y };
     }
 
-    function applyCardLayout(card, slotIndex) {
+    function syncArenaLayout() {
       var vp = core.getViewportInfo();
-      var useStacked = vp.isCompact || cardStyle === "stacked";
-      var useGrid = !useStacked && cardStyle === "grid";
-      arena.classList.toggle("is-stacked", useStacked);
-      arena.classList.toggle("is-grid", useGrid);
-      if (useStacked || useGrid) {
-        return;
-      }
+      var stacked = vp.isCompact || vp.isLandscapeShort || cardStyle === "stacked";
+      arena.classList.toggle("is-stacked", stacked);
+      arena.classList.toggle("is-grid", !stacked && cardStyle === "grid");
+    }
+
+    function applyCardLayout(card, slotIndex) {
+      if (arena.classList.contains("is-stacked") || arena.classList.contains("is-grid")) return;
       var pos = computeSlotPosition(slotIndex);
       core.setCssVar(card, "--card-x", pos.x + "px");
       core.setCssVar(card, "--card-y", pos.y + "px");
     }
 
     function reflowCards() {
-      var vp = core.getViewportInfo();
-      var useStacked = vp.isCompact || cardStyle === "stacked";
-      var useGrid = !useStacked && cardStyle === "grid";
-      arena.classList.toggle("is-stacked", useStacked);
-      arena.classList.toggle("is-grid", useGrid);
+      syncArenaLayout();
       var cap = getActiveCap();
       while (activeCards.length > cap) {
         dismissCard(activeCards[0], true);
       }
-      if (!useStacked && !useGrid) {
-        for (var i = 0; i < activeCards.length; i += 1) {
-          applyCardLayout(activeCards[i], i);
-        }
+      for (var i = 0; i < activeCards.length; i += 1) {
+        applyCardLayout(activeCards[i], i);
       }
       updateCounter();
     }
@@ -679,7 +671,7 @@
       activeCards.length = 0;
       updateCounter();
       var reduced = a11y.isReducedMotion();
-      var immediate = mode === "immediate" || reduced;
+      var immediate = mode === "immediate" || reduced || core.getViewportInfo().isConstrained;
       var staggered = mode === "staggered" && !immediate;
       for (var i = 0; i < snapshot.length; i += 1) {
         (function (card, index) {
@@ -711,7 +703,7 @@
       }
       var cap = getActiveCap();
       while (activeCards.length >= cap) {
-        dismissCard(activeCards[0], false);
+        dismissCard(activeCards[0], true);
       }
 
       var number = spawned + 1;
@@ -736,7 +728,7 @@
         "Dismiss simulated card " + number
       );
       disposer.listen(closeBtn, "click", function () {
-        dismissCard(card, false);
+        dismissCard(card, core.getViewportInfo().isConstrained);
       });
       head.appendChild(closeBtn);
 
@@ -755,7 +747,7 @@
 
     disposer.listen(clearBtn, "click", function () {
       clearAllCards("smooth");
-      a11y.announce("Cleared all simulated popup cards.");
+      a11y.announce("Cleared all simulated popup cards.", disposer);
     });
 
     var resizeTimer = null;
@@ -778,9 +770,7 @@
       3000
     );
 
-    var initialStacked = core.getViewportInfo().isCompact || cardStyle === "stacked";
-    arena.classList.toggle("is-stacked", initialStacked);
-    arena.classList.toggle("is-grid", !initialStacked && cardStyle === "grid");
+    syncArenaLayout();
     spawnCard();
 
     var spawnHandle = disposer.setInterval(function () {
@@ -799,7 +789,6 @@
       mode: "interval",
       intervalMs: 160,
       reducedIntervalMs: 240,
-      hiddenIntervalMs: 450,
       onTick: function (state) {
         if (!autoCleared && state.ratio >= cleanupRatio) {
           autoCleared = true;
@@ -968,7 +957,6 @@
       durationMs: config.durationMs,
       mode: "raf",
       reducedIntervalMs: 200,
-      hiddenIntervalMs: 450,
       onTick: function (state) {
         var remainingRatio = 1 - state.ratio;
         var wholeSeconds = Math.max(0, Math.ceil(state.remainingMs / 1000));
@@ -996,7 +984,7 @@
           if (config.soundEnabled) {
             ctx.sound.playChime();
           }
-          a11y.announce("Countdown complete. Opening prank reveal.");
+          a11y.announce("Countdown complete. Opening prank reveal.", disposer);
           return;
         }
 

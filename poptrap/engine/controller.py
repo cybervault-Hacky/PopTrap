@@ -6,7 +6,8 @@ import threading
 import time
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
-from typing import Any
+from functools import wraps
+from typing import Any, Concatenate, ParamSpec, TypeVar
 
 from poptrap.core.exceptions import (
     SessionNotFoundError,
@@ -43,6 +44,18 @@ from poptrap.engine.validation import validate_prank_config, validate_session_id
 
 SessionListener = Callable[[SessionSnapshot], None]
 PurgeListener = Callable[[str], None]
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
+
+
+def _session_transaction(
+    method: Callable[Concatenate[PrankController, _P], _R],
+) -> Callable[Concatenate[PrankController, _P], _R]:
+    @wraps(method)
+    def serialized(self: PrankController, *args: _P.args, **kwargs: _P.kwargs) -> _R:
+        with self._state_lock:
+            return method(self, *args, **kwargs)
+    return serialized
 
 
 class PrankController:
@@ -54,6 +67,7 @@ class PrankController:
         registry: TemplateRegistry | None = None,
         preset_store: PresetStore | None = None,
         max_active_sessions: int = MAX_ACTIVE_SESSIONS,
+        max_retained_sessions: int = 256,
         idle_ttl_seconds: float = SESSION_IDLE_TTL_SECONDS,
         retention_seconds: float = TERMINATED_RETENTION_SECONDS,
         clock: Callable[[], float] = time.monotonic,
@@ -69,14 +83,16 @@ class PrankController:
         self._registry = create_default_registry() if registry is None else registry
         self._preset_store: PresetStore | None = preset_store
         self._preset_lock = threading.RLock()
-        self._preview_lock = threading.RLock()
         self._active_preview_id: str | None = None
         self._idle_ttl = float(idle_ttl_seconds)
         self._retention = float(retention_seconds)
         self._logger = get_logger("engine.controller")
 
+        self._state_lock = threading.RLock()
+        self._closed = False
         self._store = SessionStore(
             max_active_sessions=max_active_sessions,
+            max_retained_sessions=max_retained_sessions,
             wall_clock=(lambda: datetime.now(UTC)) if wall_clock is None else wall_clock,
         )
         self._scheduler = SessionScheduler(
@@ -84,10 +100,11 @@ class PrankController:
             on_purge=self._handle_scheduled_purge,
             clock=clock,
             poll_interval=poll_interval,
+            transaction=self._state_lock,
         )
 
         self._listener_lock = threading.RLock()
-        self._session_listeners: list[SessionListener] = []
+        self._session_listeners: list[tuple[SessionListener, bool]] = []
         self._purge_listeners: list[PurgeListener] = []
 
         if auto_schedule:
@@ -107,24 +124,24 @@ class PrankController:
             return self._preset_store
 
     @property
+    @_session_transaction
     def active_preview_session(self) -> SessionSnapshot | None:
         """Return the currently running local Studio preview session, if any."""
         self.run_maintenance()
-        with self._preview_lock:
-            pid = self._active_preview_id
-            if pid is None:
-                return None
-            try:
-                snap = self._store.snapshot(
-                    pid, remaining_fn=self._scheduler.get_expiration_remaining
-                )
-            except SessionNotFoundError:
-                self._active_preview_id = None
-                return None
-            if is_terminal_state(snap.state):
-                self._active_preview_id = None
-                return None
-            return snap
+        pid = self._active_preview_id
+        if pid is None:
+            return None
+        try:
+            snap = self._store.snapshot(
+                pid, remaining_fn=self._scheduler.get_expiration_remaining
+            )
+        except SessionNotFoundError:
+            self._active_preview_id = None
+            return None
+        if is_terminal_state(snap.state):
+            self._active_preview_id = None
+            return None
+        return snap
 
     @property
     def active_session_count(self) -> int:
@@ -137,19 +154,25 @@ class PrankController:
         """Total records currently stored in memory (for cleanup verification)."""
         return self._store.total_count()
 
+    @property
+    def maintenance_running(self) -> bool:
+        """Whether automatic deadline and retention processing is running."""
+        return self._scheduler.is_running
+
     # ------------------------------------------------------------------
     # Event subscriptions (real-time WebSocket and TUI synchronization)
     # ------------------------------------------------------------------
 
-    def subscribe(self, listener: SessionListener) -> Callable[[], None]:
-        """Subscribe to session state transitions; returns an unsubscribe callable."""
+    def subscribe(self, listener: SessionListener, *, transitions_only: bool = False) -> Callable[[], None]:
+        """Subscribe to updates, optionally excluding client-count notifications."""
+        subscription = (listener, transitions_only)
         with self._listener_lock:
-            self._session_listeners.append(listener)
+            self._session_listeners.append(subscription)
 
         def _unsubscribe() -> None:
             with self._listener_lock:
-                if listener in self._session_listeners:
-                    self._session_listeners.remove(listener)
+                if subscription in self._session_listeners:
+                    self._session_listeners.remove(subscription)
 
         return _unsubscribe
 
@@ -165,14 +188,16 @@ class PrankController:
 
         return _unsubscribe
 
-    def _emit_session_update(self, snapshot: SessionSnapshot) -> None:
+    def _emit_session_update(self, snapshot: SessionSnapshot, *, transition: bool = True) -> None:
         with self._listener_lock:
             listeners = tuple(self._session_listeners)
-        for listener in listeners:
+        for listener, transitions_only in listeners:
+            if transitions_only and not transition:
+                continue
             try:
                 listener(snapshot)
             except Exception:  # noqa: BLE001
-                self._logger.exception("Session listener error for %s", snapshot.session_id)
+                self._logger.warning("Session listener failed.")
 
     def _emit_purge(self, session_id: str) -> None:
         with self._listener_lock:
@@ -181,7 +206,7 @@ class PrankController:
             try:
                 listener(session_id)
             except Exception:  # noqa: BLE001
-                self._logger.exception("Purge listener error for %s", session_id)
+                self._logger.warning("Session purge listener failed.")
 
     # ------------------------------------------------------------------
     # Template discovery, validation, and preview
@@ -234,6 +259,7 @@ class PrankController:
             "safety_controls": list(COMMON_SAFETY_CONTROLS),
         }
 
+    @_session_transaction
     def create_studio_session(
         self,
         raw: StudioConfig | Mapping[str, Any],
@@ -241,6 +267,8 @@ class PrankController:
         is_preview: bool = False,
     ) -> SessionSnapshot:
         """Validate a ``StudioConfig`` and allocate a bounded session record."""
+        if self._closed:
+            raise SessionStateError("The prank controller has shut down.")
         self.run_maintenance()
         studio_cfg = self.validate_studio(raw)
         prank_cfg = studio_to_prank_config(studio_cfg)
@@ -262,10 +290,8 @@ class PrankController:
         )
         self._scheduler.schedule_expiration(snapshot.session_id, self._idle_ttl)
         self._logger.info(
-            "Studio %s created: id=%s name=%r template=%s stages=%d duration=%ds",
+            "Studio %s created: template=%s stages=%d duration=%ds",
             "preview" if is_preview else "session",
-            snapshot.session_id,
-            studio_cfg.name,
             studio_cfg.template_id.value,
             len(studio_cfg.stages),
             studio_cfg.effective_duration_seconds,
@@ -276,21 +302,12 @@ class PrankController:
     def _retire_preview_session(self, session_id: str, *, reason: str) -> None:
         """Stop (if running) and immediately purge a superseded local preview."""
         try:
-            snap = self._store.snapshot(
-                session_id, remaining_fn=self._scheduler.get_expiration_remaining
-            )
-        except SessionNotFoundError:
-            return
-        if not is_terminal_state(snap.state):
-            if snap.state is SessionState.CREATED:
-                self.cancel_session(session_id, reason=reason)
-            else:
-                self.stop_session(session_id, reason=reason)
-        try:
+            self.end_session(session_id, reason=reason)
             self.purge_session(session_id)
-        except (SessionNotFoundError, SessionStateError):
+        except SessionNotFoundError:
             pass
 
+    @_session_transaction
     def start_local_preview(
         self,
         raw: StudioConfig | Mapping[str, Any],
@@ -303,22 +320,22 @@ class PrankController:
         never accumulate or exhaust concurrent session capacity.
         """
         studio_cfg = self.validate_studio(raw)
-        with self._preview_lock:
-            previous_id = self._active_preview_id
-            if previous_id is not None:
-                self._retire_preview_session(
-                    previous_id, reason="Replaced by new Studio preview."
-                )
-                self._active_preview_id = None
-
-            created = self.create_studio_session(studio_cfg, is_preview=True)
-            ready = self.start_session(created.session_id)
-            final = (
-                self.activate_session(ready.session_id) if grant_consent else ready
+        previous_id = self._active_preview_id
+        if previous_id is not None:
+            self._retire_preview_session(
+                previous_id, reason="Replaced by new Studio preview."
             )
-            self._active_preview_id = final.session_id
-            return final
+            self._active_preview_id = None
 
+        created = self.create_studio_session(studio_cfg, is_preview=True)
+        ready = self.start_session(created.session_id)
+        final = (
+            self.activate_session(ready.session_id) if grant_consent else ready
+        )
+        self._active_preview_id = final.session_id
+        return final
+
+    @_session_transaction
     def restart_local_preview(
         self,
         session_id: str,
@@ -337,24 +354,38 @@ class PrankController:
             )
 
         next_cfg = self.validate_studio(stored_cfg if raw is None else raw)
-        with self._preview_lock:
+        self._retire_preview_session(
+            checked, reason="Restarted Studio live preview."
+        )
+        if self._active_preview_id and self._active_preview_id != checked:
             self._retire_preview_session(
-                checked, reason="Restarted Studio live preview."
+                self._active_preview_id, reason="Replaced by restarted preview."
             )
-            if self._active_preview_id and self._active_preview_id != checked:
-                self._retire_preview_session(
-                    self._active_preview_id, reason="Replaced by restarted preview."
-                )
-            self._active_preview_id = None
+        self._active_preview_id = None
 
-            created = self.create_studio_session(next_cfg, is_preview=True)
-            ready = self.start_session(created.session_id)
-            final = (
-                self.activate_session(ready.session_id) if grant_consent else ready
-            )
-            self._active_preview_id = final.session_id
-            return final
+        created = self.create_studio_session(next_cfg, is_preview=True)
+        ready = self.start_session(created.session_id)
+        final = (
+            self.activate_session(ready.session_id) if grant_consent else ready
+        )
+        self._active_preview_id = final.session_id
+        return final
 
+    @_session_transaction
+    def get_preview(self, session_id: str) -> SessionSnapshot:
+        snapshot = self.get_session(session_id)
+        if not self._store.is_preview(session_id):
+            raise SessionStateError("This session is not a Studio preview.")
+        return snapshot
+
+    @_session_transaction
+    def complete_preview(self, session_id: str) -> SessionSnapshot:
+        current = self.get_preview(session_id)
+        if is_terminal_state(current.state):
+            return current
+        return self._finish_session(current.session_id, SessionState.COMPLETED, "Studio preview completed.")
+
+    @_session_transaction
     def stop_local_preview(
         self,
         session_id: str | None = None,
@@ -362,57 +393,41 @@ class PrankController:
         purge: bool = False,
     ) -> SessionSnapshot | None:
         """Immediately stop the given (or currently active) Studio preview session."""
-        self.run_maintenance()
-        with self._preview_lock:
-            target = self._active_preview_id if session_id is None else validate_session_id(session_id)
-            if target is None:
-                return None
+        target = self._active_preview_id if session_id is None else validate_session_id(session_id)
+        if target is None:
+            return None
 
-            if session_id is not None:
-                _, is_preview, _ = self._store.get_runtime_metadata(target)
-                if not is_preview:
-                    raise SessionStateError(
-                        f"Session '{target}' is not a Prank Studio local preview session."
-                    )
-
-            try:
-                current = self._store.snapshot(
-                    target, remaining_fn=self._scheduler.get_expiration_remaining
-                )
-            except SessionNotFoundError:
-                if self._active_preview_id == target:
-                    self._active_preview_id = None
-                if session_id is not None:
-                    raise
-                return None
-
-            if not is_terminal_state(current.state):
-                if current.state is SessionState.CREATED:
-                    current = self.cancel_session(
-                        target, reason="Studio live preview cancelled."
-                    )
-                else:
-                    current = self.stop_session(
-                        target, reason="Studio live preview stopped."
-                    )
-
+        try:
+            if not self._store.is_preview(target):
+                raise SessionStateError("This session is not a Studio preview.")
+            current = self.end_session(target, reason="Studio live preview stopped.")
+        except SessionNotFoundError:
             if self._active_preview_id == target:
                 self._active_preview_id = None
+            if session_id is not None:
+                raise
+            return None
 
-            if purge:
-                try:
-                    self.purge_session(target)
-                except (SessionNotFoundError, SessionStateError):
-                    pass
+        if self._active_preview_id == target:
+            self._active_preview_id = None
 
-            return current
+        if purge:
+            try:
+                self.purge_session(target)
+            except (SessionNotFoundError, SessionStateError):
+                pass
+
+        return current
 
     # ------------------------------------------------------------------
     # Session lifecycle management
     # ------------------------------------------------------------------
 
+    @_session_transaction
     def create_session(self, raw: PrankConfig | Mapping[str, Any]) -> SessionSnapshot:
         """Validate config and create a new session in ``CREATED`` state."""
+        if self._closed:
+            raise SessionStateError("The prank controller has shut down.")
         self.run_maintenance()
         config = self.validate_config(raw)
         template = self._registry.get(config.template_id)
@@ -424,14 +439,14 @@ class PrankController:
         )
         self._scheduler.schedule_expiration(snapshot.session_id, self._idle_ttl)
         self._logger.info(
-            "Session created: id=%s template=%s duration=%ds",
-            snapshot.session_id,
+            "Session created: template=%s duration=%ds",
             config.template_id.value,
             config.duration_seconds,
         )
         self._emit_session_update(snapshot)
         return snapshot
 
+    @_session_transaction
     def start_session(self, session_id: str) -> SessionSnapshot:
         """Move a ``CREATED`` session to ``READY`` (awaiting recipient consent)."""
         checked = validate_session_id(session_id)
@@ -442,11 +457,12 @@ class PrankController:
             ttl_seconds=self._idle_ttl,
         )
         self._scheduler.schedule_expiration(checked, self._idle_ttl)
-        self._logger.info("Session started (awaiting consent): id=%s", checked)
+        self._logger.info("Session started (awaiting consent).")
         self._emit_session_update(snapshot)
         return snapshot
 
-    def activate_session(self, session_id: str) -> SessionSnapshot:
+    @_session_transaction
+    def activate_session(self, session_id: str, *, playback_owner: bytes | None = None) -> SessionSnapshot:
         """Record explicit recipient consent and start the active simulation timer."""
         checked = validate_session_id(session_id)
         self.run_maintenance()
@@ -460,81 +476,57 @@ class PrankController:
             SessionState.ACTIVE,
             ttl_seconds=lifetime,
             grant_consent=True,
+            playback_owner=playback_owner,
         )
         self._scheduler.schedule_expiration(checked, lifetime)
         self._logger.info(
-            "Session activated after recipient consent: id=%s lifetime=%.1fs",
-            checked,
+            "Session activated after recipient consent: lifetime=%.1fs",
             lifetime,
         )
         self._emit_session_update(snapshot)
         return snapshot
 
+    def _finish_session(self, sid: str, target: SessionState, reason: str) -> SessionSnapshot:
+        """Transition and replace the deadline under the caller's transaction."""
+        snapshot = self._store.transition(sid, target, reason=reason)
+        self._scheduler.schedule_purge(sid, self._retention)
+        self._logger.info("Session ended: state=%s", target.value)
+        self._emit_session_update(snapshot)
+        return snapshot
+
+    @_session_transaction
     def complete_session(self, session_id: str) -> SessionSnapshot:
         """Mark an ``ACTIVE`` session as naturally ``COMPLETED``."""
-        checked = validate_session_id(session_id)
         self.run_maintenance()
-        snapshot = self._store.transition(
-            checked,
-            SessionState.COMPLETED,
-            reason="Simulation finished and reveal displayed.",
-        )
-        self._scheduler.schedule_purge(checked, self._retention)
-        self._logger.info("Session completed: id=%s", checked)
-        self._emit_session_update(snapshot)
-        return snapshot
+        return self._finish_session(session_id, SessionState.COMPLETED, "Simulation finished and reveal displayed.")
 
-    def stop_session(
-        self,
-        session_id: str,
-        *,
-        reason: str = "Session stopped.",
-    ) -> SessionSnapshot:
+    @_session_transaction
+    def stop_session(self, session_id: str, *, reason: str = "Session stopped.") -> SessionSnapshot:
         """Immediately stop a ``READY`` or ``ACTIVE`` session."""
-        checked = validate_session_id(session_id)
         self.run_maintenance()
-        snapshot = self._store.transition(
-            checked,
-            SessionState.STOPPED,
-            reason=reason,
-        )
-        self._scheduler.schedule_purge(checked, self._retention)
-        self._logger.info("Session stopped: id=%s reason=%s", checked, reason)
-        self._emit_session_update(snapshot)
-        return snapshot
+        return self._finish_session(session_id, SessionState.STOPPED, reason)
 
-    def cancel_session(
-        self,
-        session_id: str,
-        *,
-        reason: str = "Session cancelled by creator.",
-    ) -> SessionSnapshot:
+    @_session_transaction
+    def cancel_session(self, session_id: str, *, reason: str = "Session cancelled by creator.") -> SessionSnapshot:
         """Cancel a ``CREATED``, ``READY``, or ``ACTIVE`` session."""
-        checked = validate_session_id(session_id)
         self.run_maintenance()
-        snapshot = self._store.transition(
-            checked,
-            SessionState.CANCELLED,
-            reason=reason,
-        )
-        self._scheduler.schedule_purge(checked, self._retention)
-        self._logger.info("Session cancelled: id=%s reason=%s", checked, reason)
-        self._emit_session_update(snapshot)
-        return snapshot
+        return self._finish_session(session_id, SessionState.CANCELLED, reason)
 
+    @_session_transaction
     def fail_session(self, session_id: str, *, reason: str) -> SessionSnapshot:
         """Transition a session into ``FAILED`` for controlled error recovery."""
-        checked = validate_session_id(session_id)
-        snapshot = self._store.transition(
-            checked,
-            SessionState.FAILED,
-            reason=reason,
-        )
-        self._scheduler.schedule_purge(checked, self._retention)
-        self._logger.error("Session failed (recovered safely): id=%s reason=%s", checked, reason)
-        self._emit_session_update(snapshot)
-        return snapshot
+        return self._finish_session(session_id, SessionState.FAILED, reason)
 
+    @_session_transaction
+    def end_session(self, session_id: str, *, reason: str, cancel: bool = False) -> SessionSnapshot:
+        """Idempotent creator stop/cancel, including races at the hard deadline."""
+        current = self.get_session(session_id)
+        if is_terminal_state(current.state):
+            return current
+        target = SessionState.CANCELLED if cancel or current.state is SessionState.CREATED else SessionState.STOPPED
+        return self._finish_session(current.session_id, target, reason)
+
+    @_session_transaction
     def get_session(self, session_id: str) -> SessionSnapshot:
         """Return an up-to-date ``SessionSnapshot`` after checking deadlines."""
         checked = validate_session_id(session_id)
@@ -543,6 +535,7 @@ class PrankController:
             checked, remaining_fn=self._scheduler.get_expiration_remaining
         )
 
+    @_session_transaction
     def list_sessions(self, *, include_terminal: bool = False) -> tuple[SessionSnapshot, ...]:
         """List current session snapshots."""
         self.run_maintenance()
@@ -551,7 +544,29 @@ class PrankController:
             remaining_fn=self._scheduler.get_expiration_remaining,
         )
 
-    def build_browser_payload(self, session_id: str) -> dict[str, Any]:
+    def owns_playback(self, session_id: str, proof: bytes | None) -> bool:
+        """Check a scoped document digest, separate from the review URL."""
+        return self._store.owns_playback(session_id, proof)
+
+    @_session_transaction
+    def end_recipient_session(
+        self, session_id: str, proof: bytes | None, *, complete: bool = False,
+    ) -> SessionSnapshot:
+        current = self.get_session(session_id)
+        if current.consent_granted and not self.owns_playback(session_id, proof):
+            raise SessionStateError("This document does not own playback.")
+        if is_terminal_state(current.state):
+            return current
+        if complete:
+            return self._finish_session(session_id, SessionState.COMPLETED, "Simulation finished and reveal displayed.")
+        if current.state is SessionState.CREATED:
+            return self._finish_session(session_id, SessionState.CANCELLED, "Session closed before start.")
+        return self._finish_session(session_id, SessionState.STOPPED, "Exited by recipient.")
+
+    @_session_transaction
+    def build_browser_payload(
+        self, session_id: str, *, recipient: bool = False, playback_owner: bytes | None = None,
+    ) -> dict[str, Any]:
         """Build the validated browser API response for ``session_id``.
 
         Withholds active template simulation parameters until explicit recipient
@@ -559,22 +574,21 @@ class PrankController:
         """
         snapshot = self.get_session(session_id)
         template = self._registry.get(snapshot.config.template_id)
-        runtime_override, is_preview, _ = self._store.get_runtime_metadata(
-            snapshot.session_id
-        )
-
+        is_preview = self._store.is_preview(snapshot.session_id)
         runtime_data: dict[str, Any] | None = None
-        if snapshot.state is SessionState.ACTIVE and snapshot.consent_granted:
+        authorized = not recipient or self.owns_playback(snapshot.session_id, playback_owner)
+        if authorized and snapshot.state is SessionState.ACTIVE and snapshot.consent_granted:
             try:
+                runtime_override, _, _ = self._store.get_runtime_metadata(snapshot.session_id)
                 runtime_data = (
                     runtime_override
                     if runtime_override is not None
                     else template.build_runtime_payload(snapshot.config)
                 )
-            except Exception as exc:  # noqa: BLE001
+            except Exception:  # noqa: BLE001
                 snapshot = self.fail_session(
                     snapshot.session_id,
-                    reason=f"Template payload recovery triggered: {exc}",
+                    reason="Template payload recovery stopped this simulation safely.",
                 )
 
         session_dict: dict[str, Any] = {
@@ -598,6 +612,10 @@ class PrankController:
             "connected_clients": snapshot.connected_clients,
             "is_terminal": is_terminal_state(snapshot.state),
         }
+        if not authorized:
+            session_dict.pop("custom_message", None)
+            session_dict.pop("reveal_message", None)
+            session_dict.pop("termination_reason", None)
         if is_preview:
             session_dict["is_preview"] = True
 
@@ -610,6 +628,7 @@ class PrankController:
     # Client tracking, scheduled expiration, cleanup, and shutdown
     # ------------------------------------------------------------------
 
+    @_session_transaction
     def register_client_connection(self, session_id: str) -> SessionSnapshot:
         """Track a newly connected browser WebSocket client."""
         checked = validate_session_id(session_id)
@@ -617,9 +636,10 @@ class PrankController:
         snapshot = self._store.snapshot(
             checked, remaining_fn=self._scheduler.get_expiration_remaining
         )
-        self._emit_session_update(snapshot)
+        self._emit_session_update(snapshot, transition=False)
         return snapshot
 
+    @_session_transaction
     def unregister_client_connection(self, session_id: str) -> None:
         """Decrement live browser client count when a WebSocket disconnects."""
         updated = self._store.adjust_clients(session_id, -1)
@@ -631,7 +651,7 @@ class PrankController:
             )
         except SessionNotFoundError:
             return
-        self._emit_session_update(snapshot)
+        self._emit_session_update(snapshot, transition=False)
 
     def _handle_scheduled_expiration(self, session_id: str) -> None:
         try:
@@ -658,12 +678,12 @@ class PrankController:
             return
 
         self._scheduler.schedule_purge(session_id, self._retention)
-        self._logger.info("Session expired automatically: id=%s (%s)", session_id, reason)
+        self._logger.info("Session expired automatically.")
         self._emit_session_update(snapshot)
 
     def _handle_scheduled_purge(self, session_id: str) -> None:
         if self._store.delete(session_id):
-            self._logger.debug("Session purged from memory: id=%s", session_id)
+            self._logger.debug("Session purged from memory.")
             self._emit_purge(session_id)
 
     def run_maintenance(self) -> MaintenanceReport:
@@ -671,6 +691,7 @@ class PrankController:
         expired, purged = self._scheduler.tick()
         return MaintenanceReport(expired_ids=expired, purged_ids=purged)
 
+    @_session_transaction
     def purge_session(self, session_id: str) -> bool:
         """Remove a terminal session record immediately."""
         checked = validate_session_id(session_id)
@@ -688,21 +709,24 @@ class PrankController:
             self._emit_purge(checked)
         return removed
 
-    def shutdown(self) -> None:
-        """Stop scheduler, terminate all active sessions, and release state."""
-        self._scheduler.stop()
+    @_session_transaction
+    def cancel_all_sessions(self, *, reason: str) -> None:
         for sid in self._store.non_terminal_ids():
+            # A deadline sweep may have ended or purged another record.
             try:
-                snapshot = self._store.transition(
-                    sid,
-                    SessionState.CANCELLED,
-                    reason="POPTRAP engine shutting down.",
-                )
-                self._emit_session_update(snapshot)
+                self.cancel_session(sid, reason=reason)
             except (SessionNotFoundError, SessionStateError):
                 continue
-        with self._preview_lock:
+
+    def shutdown(self) -> None:
+        """Terminate all sessions, stop the scheduler, and reject new records."""
+        with self._state_lock:
+            if self._closed:
+                return
+            self._closed = True
+            self.cancel_all_sessions(reason="POPTRAP engine shutting down.")
             self._active_preview_id = None
-        self._scheduler.clear()
-        self._store.clear()
+            self._scheduler.clear()
+            self._store.clear()
+        self._scheduler.stop()
         self._logger.info("Prank controller shut down cleanly.")

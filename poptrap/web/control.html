@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="dark">
+  <meta name="referrer" content="no-referrer">
+  <title>POPTRAP — Control Center</title>
+  <link rel="stylesheet" href="/static/styles/control.css">
+  <script src="/static/scripts/control.js" defer></script>
+</head>
+<body>
+  <div id="access" class="gate">
+    <div class="wordmark"><span class="brand-icon" aria-hidden="true">P</span> POPTRAP</div>
+    <div class="surface gate-card">
+      <p class="eyebrow">Creator access</p>
+      <h1>Control Center</h1>
+      <p id="access-message" role="status">Open a new one-time access link using Ctrl+D in the POPTRAP terminal.</p>
+      <p class="muted">This workspace is available only on the computer running POPTRAP.</p>
+      <noscript><p>JavaScript is required to unlock and use Control Center.</p></noscript>
+    </div>
+  </div>
+
+  <div id="workspace" hidden>
+    <a class="skip" href="#view-heading">Skip to workspace</a>
+    <header class="topbar">
+      <div class="topbar-inner">
+        <div class="wordmark"><span class="brand-icon" aria-hidden="true">P</span> POPTRAP <span class="wordmark-detail">/ Creator workspace</span></div>
+        <div class="bar-actions">
+          <span id="sync" class="chip" role="status" data-state="waiting">Connecting</span>
+          <button id="lock" type="button">Lock dashboard</button>
+        </div>
+      </div>
+    </header>
+    <div class="layout">
+      <aside>
+        <p class="eyebrow nav-label">Workspace</p>
+        <nav aria-label="Creator workspace">
+          <button type="button" data-view="overview" aria-current="page">Overview</button>
+          <button type="button" data-view="sessions">Sessions</button>
+          <button type="button" data-view="devices">Devices</button>
+          <button type="button" data-view="delivery">Delivery</button>
+          <button type="button" data-view="templates">Templates</button>
+          <button type="button" data-view="presets">Studio presets</button>
+          <button type="button" data-view="activity">Activity</button>
+          <button type="button" data-view="diagnostics">Diagnostics</button>
+          <button type="button" data-view="settings">Settings</button>
+        </nav>
+        <p class="nav-note"><span aria-hidden="true">●</span> Local creator only<br>Every simulation requires consent.</p>
+      </aside>
+
+      <main id="content">
+        <div class="view-intro">
+          <p class="eyebrow">Control Center <span aria-hidden="true">/</span> <span id="view-section">Overview</span></p>
+          <h1 id="view-heading" tabindex="-1">Control Center</h1>
+          <p id="view-summary">Manage your sessions, invitations, and local workspace.</p>
+        </div>
+        <p id="feedback" role="status" class="feedback" hidden></p>
+
+        <section id="handoff" aria-labelledby="handoff-title" class="surface handoff" tabindex="-1" hidden>
+          <div class="line">
+            <h2 id="handoff-title">Prepared link</h2>
+            <button id="close-handoff" type="button">Dismiss</button>
+          </div>
+          <div id="handoff-body"></div>
+        </section>
+
+        <section id="view-overview" aria-labelledby="view-heading">
+          <dl class="metrics" id="metrics" aria-label="Current workspace counts">
+            <div class="surface metric"><dt>Running now</dt><dd id="count-active">—</dd><dd class="metric-note">Launch consent given</dd></div>
+            <div class="surface metric"><dt>Not launched</dt><dd id="count-waiting">—</dd><dd class="metric-note">Created or awaiting Launch</dd></div>
+            <div class="surface metric"><dt>Opted-in browsers</dt><dd id="count-devices">—</dd><dd class="metric-note">With an active availability lease</dd></div>
+            <div class="surface metric"><dt>Pending invitations</dt><dd id="count-invites">—</dd><dd class="metric-note">Not yet accepted or declined</dd></div>
+          </dl>
+          <div class="split">
+            <section class="surface block" aria-labelledby="overview-delivery">
+              <div class="line"><h2 id="overview-delivery">Delivery at a glance</h2><button type="button" data-jump="delivery">Manage delivery</button></div>
+              <dl id="overview-status" class="facts"><div><dt>Workspace</dt><dd>Waiting for live state</dd></div></dl>
+            </section>
+            <section class="surface block" aria-labelledby="overview-activity">
+              <div class="line"><h2 id="overview-activity">Recent activity</h2><button type="button" data-jump="activity">View activity</button></div>
+              <ul id="recent" class="list feed"><li class="empty">Waiting for live state.</li></ul>
+            </section>
+          </div>
+        </section>
+
+        <section id="view-sessions" aria-labelledby="view-heading" hidden>
+          <div class="surface toolbar">
+            <label>Session ID <input id="session-search" type="search" placeholder="Search by ID" maxlength="48" autocomplete="off"></label>
+            <label>Status <select id="session-status">
+              <option value="">All statuses</option><option value="active">Active</option><option value="ready">Ready</option><option value="created">Created</option>
+              <option value="completed">Completed</option><option value="stopped">Stopped</option><option value="expired">Expired</option><option value="cancelled">Cancelled</option><option value="failed">Failed</option>
+            </select></label>
+            <button id="cleanup" type="button" data-action>Run due cleanup</button>
+          </div>
+          <p class="muted">Cleanup honors existing expiration and retention windows. Stop and revoke affect only the selected session.</p>
+          <ul id="sessions" class="list cards" tabindex="-1"></ul>
+        </section>
+
+        <section id="view-devices" aria-labelledby="view-heading" hidden>
+          <div class="surface block">
+            <div class="line"><h2>Availability window</h2><button type="button" data-jump="delivery">Listener settings</button></div>
+            <p class="muted" id="joining-status"></p>
+            <div class="actions">
+              <button id="open-joining" type="button" data-action>Open join window</button>
+              <button id="join-link" type="button" data-action>Show join link</button>
+              <button id="close-joining" type="button" data-action>Close joining</button>
+            </div>
+          </div>
+          <div class="surface block">
+            <div class="line"><h2>Available browsers</h2><span id="device-count" class="chip"></span></div>
+            <p class="muted">Only browsers that explicitly opted in are listed. Wi-Fi connectivity alone is not permission.</p>
+            <div class="actions">
+              <button id="select-all" type="button" data-action>Select all eligible</button>
+              <button id="select-none" type="button" data-action>Deselect all</button>
+            </div>
+            <ul id="devices" class="list divided" tabindex="-1"></ul>
+          </div>
+          <form id="queue-form" class="surface block">
+            <h2>Send invitations</h2><p class="muted">One single-use offer per selected browser. Queued does not mean received, accepted, or launched.</p>
+            <div class="toolbar inner-toolbar">
+              <label>Experience <select id="queue-source" required></select></label>
+              <label>Lifetime (seconds) <input id="queue-ttl" type="number" min="15" max="300" value="120" required></label>
+              <button id="queue" class="primary" type="submit" data-action>Queue for selected</button>
+            </div>
+            <ul id="queue-results" class="list divided" aria-label="Last send results" hidden></ul>
+          </form>
+          <h2 class="subheading">LAN invitations</h2>
+          <ul id="device-invitations" class="list cards" tabindex="-1"></ul>
+        </section>
+
+        <section id="view-delivery" aria-labelledby="view-heading" hidden>
+          <div class="split">
+            <section class="surface block">
+              <h2>Recipient listener</h2><p id="listener-status" class="muted"></p>
+              <div class="actions">
+                <button id="start-loopback" type="button" data-action>Start loopback</button>
+                <button id="stop-listener" class="danger" type="button" data-action>Stop listener</button>
+                <a id="scan-link" hidden target="_blank" rel="noopener noreferrer">Open QR scanner</a>
+              </div>
+              <form id="lan-form">
+                <div class="toolbar inner-toolbar">
+                  <label>Assigned LAN interface <select id="lan-address" required></select></label>
+                  <button class="primary" id="start-lan" type="submit" data-action>Enable LAN</button>
+                </div>
+                <p id="network-notice" class="muted">Loopback is local only. Enable LAN only on a trusted private network.</p>
+              </form>
+            </section>
+            <section class="surface block">
+              <h2>Bluetooth</h2><p id="bt-status" class="muted"></p>
+              <p class="muted">Use terminal Bluetooth for paired delivery. A receipt acknowledgement is not recipient acceptance or Launch consent.</p>
+              <button type="button" data-jump="diagnostics">Check capabilities</button>
+            </section>
+          </div>
+          <form id="share-form" class="surface block spaced">
+            <h2>Share link &amp; QR</h2><p class="muted">Both contain the same expiring, single-use invitation. Share only with the intended recipient.</p>
+            <div class="toolbar inner-toolbar">
+              <label>Experience <select id="share-source" required></select></label>
+              <label>Lifetime (seconds) <input id="share-ttl" type="number" min="15" max="300" value="120" required></label>
+              <button id="create-share" class="primary" type="submit" data-action>Create link &amp; QR</button>
+            </div>
+          </form>
+          <h2 class="subheading">All invitations</h2>
+          <ul id="invitations" class="list cards" tabindex="-1"></ul>
+        </section>
+
+        <section id="view-templates" aria-labelledby="view-heading" hidden>
+          <ul id="templates" class="list cards tiles" tabindex="-1"></ul>
+        </section>
+
+        <section id="view-presets" aria-labelledby="view-heading" hidden>
+          <div class="surface block line">
+            <p class="muted">Create or edit in Studio. Save there to update your local library.</p>
+            <button class="primary" id="new-experience" type="button" data-action>New experience</button>
+          </div>
+          <p id="preset-notice" class="muted"></p>
+          <ul id="presets" class="list cards" tabindex="-1"></ul>
+        </section>
+
+        <section id="view-activity" aria-labelledby="view-heading" hidden>
+          <div class="surface block">
+            <h2>Lifecycle events</h2><p class="muted">Up to 120 events from the last hour, in this process only. No device addresses, names, or access links are retained here.</p>
+            <ul id="activity" class="list feed"></ul>
+          </div>
+        </section>
+
+        <section id="view-diagnostics" aria-labelledby="view-heading" hidden>
+          <section class="surface block" aria-labelledby="browser-checks-title">
+            <h2 id="browser-checks-title">This browser</h2>
+            <p class="muted">Local feature detection only. Does not test recipient browsers or request camera, Bluetooth, or clipboard permissions.</p>
+            <dl id="browser-checks" class="facts"></dl>
+          </section>
+          <section class="surface block spaced" aria-labelledby="host-checks-title">
+            <div class="line"><h2 id="host-checks-title">Host checks</h2><button id="run-checks" class="primary" type="button" data-action>Run checks</button></div>
+            <p id="last-checked" class="muted">Not run yet. Checks never enable listeners or scan for devices.</p>
+            <ul id="checks" class="list divided"></ul>
+          </section>
+        </section>
+
+        <section id="view-settings" aria-labelledby="view-heading" hidden>
+          <form id="preferences" class="surface block">
+            <h2>Application preferences</h2><p class="muted">These are stored in the same local TOML as terminal Settings. They do not change recipient consent or safety controls.</p>
+            <div class="settings-grid">
+              <label>Terminal theme <select name="theme"><option value="cyan-dark">Cyan dark</option><option value="ice-dark">Ice dark</option><option value="mono-dark">Mono dark</option></select></label>
+              <label>Terminal language <select name="language"><option value="en">English</option><option value="es">Español</option><option value="fr">Français</option><option value="de">Deutsch</option></select></label>
+              <label>Log level <select name="log_level"><option>DEBUG</option><option>INFO</option><option>WARNING</option><option>ERROR</option><option>CRITICAL</option></select></label>
+              <label class="check-label"><input name="sound" type="checkbox"> Terminal feedback sound</label>
+            </div>
+            <div class="actions">
+              <button class="primary" type="submit" data-action>Save preferences</button>
+              <button id="reload-preferences" type="button">Reload current values</button>
+            </div>
+          </form>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <dialog id="confirmation" aria-labelledby="confirm-title" aria-describedby="confirm-message">
+    <h2 id="confirm-title">Confirm action</h2>
+    <p id="confirm-message"></p>
+    <div class="actions"><button id="confirm-cancel" type="button">Go back</button><button id="confirm-go" class="danger" type="button">Confirm</button></div>
+  </dialog>
+</body>
+</html>

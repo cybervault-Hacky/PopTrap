@@ -7,6 +7,7 @@ from textual.binding import Binding
 from textual.containers import Container, Horizontal, Vertical, VerticalScroll
 from textual.widgets import Button, Select, Static, Switch
 
+from poptrap import __version__
 from poptrap.core.config import LanguageCode, LogLevel, ThemeName
 from poptrap.core.exceptions import ConfigurationError
 from poptrap.core.i18n import LANGUAGE_LABELS, t
@@ -33,7 +34,7 @@ class SettingsScreen(BasePopTrapScreen):
             with Vertical(classes="content-frame settings-frame"):
                 yield SectionHeader(
                     t("settings.title", lang),
-                    f"v{cfg.app.version}",
+                    f"v{__version__}",
                     unicode_enabled=unicode_ok,
                     id="settings-header",
                 )
@@ -46,7 +47,7 @@ class SettingsScreen(BasePopTrapScreen):
                             id="lbl-application",
                         )
                         yield Static(
-                            f"{cfg.app.name} {cfg.app.version}",
+                            f"{cfg.app.name} {__version__}",
                             classes="setting-readonly",
                             id="val-application",
                         )
@@ -221,10 +222,10 @@ class SettingsScreen(BasePopTrapScreen):
 
         self.query_one(SectionHeader).set_content(
             t("settings.title", lang),
-            f"v{cfg.app.version}",
+            f"v{__version__}",
         )
         self.query_one("#lbl-application", Static).update(t("settings.application", lang))
-        self.query_one("#val-application", Static).update(f"{cfg.app.name} {cfg.app.version}")
+        self.query_one("#val-application", Static).update(f"{cfg.app.name} {__version__}")
         self.query_one("#lbl-platform", Static).update(t("settings.platform", lang))
         self.query_one("#val-platform", Static).update(self._format_platform())
         self.query_one("#lbl-theme", Static).update(t("settings.theme", lang))

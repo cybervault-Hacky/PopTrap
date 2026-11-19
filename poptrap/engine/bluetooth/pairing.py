@@ -209,7 +209,7 @@ class PairingManager:
             self._cancel_event = cancel_event
             start_snap = self._snapshot_locked()
 
-        self._logger.info("Initiating user-confirmed OS pairing with %s", normalized)
+        self._logger.info("Initiating user-confirmed OS pairing.")
         self._emit(start_snap)
 
         try:
@@ -268,7 +268,7 @@ class PairingManager:
         )
         if self._on_paired is not None:
             self._on_paired(normalized)
-        self._logger.info("Bluetooth pairing confirmed for %s", normalized)
+        self._logger.info("Bluetooth pairing confirmed.")
         self._emit(snap)
         return snap
 

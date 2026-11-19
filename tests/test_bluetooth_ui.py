@@ -41,8 +41,9 @@ from poptrap.engine.models import PrankConfig, SessionState, TemplateId
 from poptrap.ui.screens import (
     BluetoothScreen,
     CreatePrankScreen,
+    LocalNetworkScreen,
     MainMenuScreen,
-    ModuleStatusScreen,
+    ShareLinkScreen,
 )
 from poptrap.utils.platform import (
     OperatingSystem,
@@ -161,11 +162,11 @@ class TestBluetoothMenuAndUnsupportedPlatformUI:
                 await pilot.pause()
                 assert isinstance(app.screen, MainMenuScreen)
 
-                # 3. QR and 4. Local Network stay strictly unavailable (Phase 6 not started).
-                for key in ("3", "4"):
+                # Separate opt-in delivery is accessible without changing Bluetooth capability.
+                for key, screen in (("3", ShareLinkScreen), ("4", LocalNetworkScreen)):
                     await pilot.press(key)
                     await pilot.pause()
-                    assert isinstance(app.screen, ModuleStatusScreen)
+                    assert isinstance(app.screen, screen)
                     await pilot.press("escape")
                     await pilot.pause()
                     assert isinstance(app.screen, MainMenuScreen)
@@ -408,14 +409,12 @@ class TestBrowserBluetoothNodeSuite:
         assert proc.returncode == 0, f"{proc.stdout}\n{proc.stderr}"
 
     def test_bluetooth_browser_assets_served_with_strict_security_headers(self) -> None:
-        from fastapi.testclient import TestClient
-
         from poptrap.engine.runtime.assets import SECURITY_HEADERS
-        from poptrap.engine.runtime.server import create_runtime_app
+        from tests.runtime_http import runtime_client
 
         controller = PrankController(auto_schedule=False)
         try:
-            client = TestClient(create_runtime_app(controller))
+            client = runtime_client(controller)
             for asset in (
                 "/static/bluetooth.html",
                 "/static/styles/bluetooth.css",

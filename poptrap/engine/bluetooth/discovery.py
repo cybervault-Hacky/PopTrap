@@ -299,9 +299,7 @@ class DiscoveryManager:
         if final_snap.state is DiscoveryState.CANCELLED:
             self._logger.info("Bluetooth discovery cancelled cleanly.")
         elif final_snap.state is DiscoveryState.FAILED:
-            self._logger.warning(
-                "Bluetooth discovery failed: %s", final_snap.error_message
-            )
+            self._logger.warning("Bluetooth discovery failed.")
         else:
             self._logger.info(
                 "Bluetooth discovery completed: %d device(s) found.",

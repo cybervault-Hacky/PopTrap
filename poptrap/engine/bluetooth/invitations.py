@@ -23,6 +23,8 @@ from collections.abc import Callable
 from pydantic import ValidationError
 
 from poptrap.core.exceptions import SessionIdentifierError
+from poptrap.core.logging_setup import get_logger
+from poptrap.engine.activity import ActivityKind
 from poptrap.engine.bluetooth.errors import (
     BluetoothConsentRequiredError,
     InvitationCancelledError,
@@ -52,6 +54,7 @@ from poptrap.engine.bluetooth.models import (
     InvitationType,
     normalize_device_address,
 )
+from poptrap.engine.http_safety import strict_json
 from poptrap.engine.validation import validate_session_id
 
 MIN_SIGNING_KEY_BYTES: int = 32
@@ -144,11 +147,9 @@ def parse_invitation_bytes(raw: bytes | bytearray | str) -> InvitationEnvelope:
         ) from exc
 
     try:
-        parsed = json.loads(decoded_text)
-    except json.JSONDecodeError as exc:
-        raise InvitationValidationError(
-            f"Invitation payload is not valid JSON (pos {exc.pos})."
-        ) from exc
+        parsed = strict_json(decoded_text)
+    except (ValueError, RecursionError) as exc:
+        raise InvitationValidationError("Invitation payload is not valid unambiguous JSON.") from exc
 
     if not isinstance(parsed, dict):
         raise InvitationValidationError("Invitation payload must be a JSON object.")
@@ -193,6 +194,7 @@ class InvitationManager:
 
         self._signing_key = resolved_key
         self._epoch_clock = epoch_clock
+        self._latest_epoch = int(epoch_clock())
         self._session_validator = session_validator
         self._id_factory = (
             (lambda: secrets.token_urlsafe(18)) if id_factory is None else id_factory
@@ -201,14 +203,35 @@ class InvitationManager:
         self._max_replay_entries = max(16, int(max_replay_entries))
 
         self._lock = threading.RLock()
+        self._activity_listeners: list[Callable[[ActivityKind], None]] = []
         self._records: OrderedDict[str, InvitationRecord] = OrderedDict()
-        # Maps consumed invitation_id -> accepted_at unix timestamp
-        self._consumed_ids: OrderedDict[str, int] = OrderedDict()
-        # Maps cancelled invitation_id -> cancelled_at unix timestamp
-        self._cancelled_ids: OrderedDict[str, int] = OrderedDict()
+        # Reserve a slot for every admitted ID until its signed expiry. The
+        # shorter UI history can evict terminal rows, never live replay state.
+        self._reserved: dict[str, tuple[int, InvitationState]] = {}
+
+    def subscribe_activity(self, listener: Callable[[ActivityKind], None]) -> Callable[[], None]:
+        """Observe lifecycle events without receiving IDs, addresses or wire data."""
+        with self._lock:
+            self._activity_listeners.append(listener)
+
+        def unsubscribe() -> None:
+            with self._lock:
+                if listener in self._activity_listeners:
+                    self._activity_listeners.remove(listener)
+
+        return unsubscribe
+
+    def _emit_activity(self, kind: ActivityKind) -> None:
+        for listener in tuple(self._activity_listeners):
+            try:
+                listener(kind)
+            except Exception:  # noqa: BLE001 - observers must not affect invitation state
+                get_logger("engine.bluetooth.invitations").warning("Invitation activity observer failed.")
 
     def _now_epoch(self) -> int:
-        return int(self._epoch_clock())
+        # A backwards wall-clock adjustment must not resurrect expired wire data.
+        self._latest_epoch = max(self._latest_epoch, int(self._epoch_clock()))
+        return self._latest_epoch
 
     def _compute_mac(
         self,
@@ -242,13 +265,14 @@ class InvitationManager:
                 field_errors=("integrity: HMAC verification failed.",),
             )
 
-    def _remember_bounded(
-        self, cache: OrderedDict[str, int], key: str, timestamp: int
-    ) -> None:
-        cache[key] = timestamp
-        cache.move_to_end(key)
-        while len(cache) > self._max_replay_entries:
-            cache.popitem(last=False)
+    def _reserve(self, envelope: InvitationEnvelope, state: InvitationState) -> None:
+        key = envelope.invitation_id
+        if key not in self._reserved and len(self._reserved) >= self._max_replay_entries:
+            raise InvitationDuplicateError(
+                "Invitation security window is full.",
+                hint="Wait for an existing invitation to expire before admitting another.",
+            )
+        self._reserved[key] = (envelope.expires_at, state)
 
     def _evict_terminal_if_needed(self) -> None:
         if len(self._records) < self._max_tracked:
@@ -268,6 +292,9 @@ class InvitationManager:
         """Transition any pending/sent invitations whose ``expires_at <= now`` to ``EXPIRED``."""
         with self._lock:
             now = self._now_epoch()
+            for key, (expiry, _) in tuple(self._reserved.items()):
+                if now >= expiry:
+                    del self._reserved[key]
             expired_count = 0
             for inv_id, rec in list(self._records.items()):
                 if not is_terminal_invitation_state(rec.state) and now >= rec.envelope.expires_at:
@@ -275,6 +302,7 @@ class InvitationManager:
                         rec.state, InvitationState.EXPIRED
                     )
                     self._records[inv_id] = rec.model_copy(update={"state": next_state})
+                    self._emit_activity(ActivityKind.INVITATION_EXPIRED)
                     expired_count += 1
             return expired_count
 
@@ -339,13 +367,10 @@ class InvitationManager:
                         hint="Cancel the existing invitation or wait for it to expire first.",
                     )
 
-            self._evict_terminal_if_needed()
-
             invitation_id = self._id_factory()
             if (
                 invitation_id in self._records
-                or invitation_id in self._consumed_ids
-                or invitation_id in self._cancelled_ids
+                or invitation_id in self._reserved
             ):
                 raise InvitationDuplicateError(
                     "Duplicate invitation identifier rejected."
@@ -384,7 +409,10 @@ class InvitationManager:
                 payload_size_bytes=len(wire_bytes),
                 target_address=normalized_target,
             )
+            self._evict_terminal_if_needed()
+            self._reserve(envelope, InvitationState.PENDING)
             self._records[invitation_id] = record
+            self._emit_activity(ActivityKind.INVITATION_GENERATED)
             return record, wire_bytes
 
     def register_incoming(
@@ -395,11 +423,11 @@ class InvitationManager:
         Rejects duplicate invitation IDs, replayed single-use tokens, cancelled
         invitations, tampered MACs, oversized frames, and expired envelopes.
         """
-        envelope = self.verify_payload(raw)
-        raw_bytes = encode_invitation_envelope(envelope)
         with self._lock:
+            envelope = self.verify_payload(raw)
+            raw_bytes = encode_invitation_envelope(envelope)
             inv_id = envelope.invitation_id
-            if inv_id in self._records:
+            if inv_id in self._records or inv_id in self._reserved:
                 raise InvitationDuplicateError(
                     "Duplicate invitation received; invitation is already registered."
                 )
@@ -416,6 +444,7 @@ class InvitationManager:
                 ttl_seconds=ttl,
                 payload_size_bytes=len(raw_bytes),
             )
+            self._reserve(envelope, InvitationState.PENDING)
             self._records[inv_id] = record
             return record
 
@@ -436,17 +465,20 @@ class InvitationManager:
             inv_id = envelope.invitation_id
             now = self._now_epoch()
 
-            if inv_id in self._consumed_ids:
-                raise InvitationReplayError(
-                    "Invitation has already been accepted and cannot be reused (replay blocked)."
-                )
-            if inv_id in self._cancelled_ids:
-                raise InvitationCancelledError(
-                    "Invitation was cancelled and is no longer valid."
-                )
+            reserved = self._reserved.get(inv_id)
+            if reserved is not None:
+                expiry, state = reserved
+                if state is InvitationState.ACCEPTED:
+                    raise InvitationReplayError("Invitation has already been accepted (replay blocked).")
+                if state is InvitationState.CANCELLED:
+                    raise InvitationCancelledError("Invitation was cancelled and is no longer valid.")
+                if expiry != envelope.expires_at:
+                    raise InvitationValidationError("Invitation identifier is bound to a different envelope.")
 
             existing = self._records.get(inv_id)
             if existing is not None:
+                if existing.envelope != envelope:
+                    raise InvitationValidationError("Invitation identifier is bound to a different envelope.")
                 if existing.state is InvitationState.ACCEPTED:
                     raise InvitationReplayError(
                         "Invitation has already been used and cannot be replayed."
@@ -468,6 +500,8 @@ class InvitationManager:
                 raise InvitationExpiredError(
                     "Invitation has expired and can no longer be accepted."
                 )
+            if envelope.expires_at > now + MAX_INVITATION_TTL_SECONDS:
+                raise InvitationValidationError("Invitation expiry exceeds the maximum lifetime. Check both clocks.")
 
         return envelope
 
@@ -526,17 +560,19 @@ class InvitationManager:
                 self._session_validator(envelope.session_ref)
 
             now = self._now_epoch()
+            if now >= envelope.expires_at:
+                raise InvitationExpiredError("Invitation expired before acceptance.")
             inv_id = envelope.invitation_id
             existing = self._records.get(inv_id)
             if existing is not None:
-                next_state = ensure_invitation_transition(
-                    existing.state, InvitationState.ACCEPTED
-                )
+                next_state = ensure_invitation_transition(existing.state, InvitationState.ACCEPTED)
+            self._reserve(envelope, InvitationState.ACCEPTED)
+            if existing is not None:
                 self._records[inv_id] = existing.model_copy(
                     update={"state": next_state, "accepted_at": now}
                 )
 
-            self._remember_bounded(self._consumed_ids, inv_id, now)
+            self._emit_activity(ActivityKind.INVITATION_ACCEPTED)
 
             return InvitationAcceptance(
                 invitation_id=inv_id,
@@ -547,7 +583,7 @@ class InvitationManager:
                 requires_session_consent=True,
             )
 
-    def cancel_invitation(self, invitation_id: str) -> InvitationRecord:
+    def cancel_invitation(self, invitation_id: str, *, revoked: bool = True) -> InvitationRecord:
         """Explicitly cancel a pending or sent invitation and prevent future use."""
         with self._lock:
             self.expire_due()
@@ -572,7 +608,8 @@ class InvitationManager:
                 update={"state": next_state, "cancelled_at": now}
             )
             self._records[invitation_id] = updated
-            self._remember_bounded(self._cancelled_ids, invitation_id, now)
+            self._reserve(record.envelope, InvitationState.CANCELLED)
+            self._emit_activity(ActivityKind.INVITATION_REVOKED if revoked else ActivityKind.INVITATION_CANCELLED)
             return updated
 
     def cancel_all_active(self) -> int:
@@ -589,7 +626,8 @@ class InvitationManager:
                             "cancelled_at": now,
                         }
                     )
-                    self._remember_bounded(self._cancelled_ids, inv_id, now)
+                    self._reserve(record.envelope, InvitationState.CANCELLED)
+                    self._emit_activity(ActivityKind.INVITATION_CANCELLED)
                     cancelled += 1
             return cancelled
 
@@ -614,7 +652,7 @@ class InvitationManager:
             return tuple(items)
 
     def clear(self) -> None:
-        """Cancel active invitations and clear in-memory tracking tables."""
+        """Clear UI history without reopening the still-valid replay window."""
         with self._lock:
             self.cancel_all_active()
             self._records.clear()

@@ -33,6 +33,7 @@ class SessionScheduler:
         on_purge: Callable[[str], None],
         clock: Callable[[], float] = time.monotonic,
         poll_interval: float = DEFAULT_POLL_INTERVAL_SECONDS,
+        transaction: threading.RLock | None = None,
     ) -> None:
         if poll_interval <= 0:
             raise ValueError("poll_interval must be positive.")
@@ -41,6 +42,7 @@ class SessionScheduler:
         self._clock = clock
         self._poll_interval = float(poll_interval)
         self._lock = threading.RLock()
+        self._transaction = threading.RLock() if transaction is None else transaction
         self._entries: dict[str, _DeadlineEntry] = {}
         self._stop_event = threading.Event()
         self._worker: threading.Thread | None = None
@@ -106,6 +108,10 @@ class SessionScheduler:
 
         Returns ``(expired_session_ids, purged_session_ids)``.
         """
+        with self._transaction:
+            return self._tick()
+
+    def _tick(self) -> tuple[tuple[str, ...], tuple[str, ...]]:
         current = self.now()
         due_expire: list[str] = []
         with self._lock:
@@ -120,7 +126,7 @@ class SessionScheduler:
                 self._on_expire(sid)
                 expired_executed.append(sid)
             except Exception:  # noqa: BLE001 - isolate scheduler loop from callback bugs
-                self._logger.exception("Expiration handler failed for session %s", sid)
+                self._logger.warning("Session expiration handler failed.")
 
         # Evaluate purge deadlines after expirations so zero-retention sessions
         # can be cleaned up in the same maintenance sweep.
@@ -138,7 +144,7 @@ class SessionScheduler:
                 self._on_purge(sid)
                 purged_executed.append(sid)
             except Exception:  # noqa: BLE001
-                self._logger.exception("Purge handler failed for session %s", sid)
+                self._logger.warning("Session purge handler failed.")
 
         return tuple(expired_executed), tuple(purged_executed)
 
