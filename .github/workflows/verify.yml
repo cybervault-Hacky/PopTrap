@@ -19,10 +19,60 @@ jobs:
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: '22'
-      - run: python -m pip install --require-hashes --only-binary=:all: -r requirements/test.lock -r requirements/build.lock
+      # Quoted: "--only-binary=:all: -r" contains ": ", which is illegal inside an
+      # unquoted YAML plain scalar and made GitHub reject this workflow before any
+      # job was created (every earlier run failed in 0s with no log).
+      - run: 'python -m pip install --require-hashes --only-binary=:all: -r requirements/test.lock -r requirements/build.lock'
       - run: python -m pip check
-      - run: python -m pytest -q
-      - run: node --test tests/web/*.mjs
+      - name: Verify lock hashes and per-platform wheel availability
+        run: |
+          set -o pipefail
+          python tools/verify_install.py --stages structure,hashes,platforms 2>&1 | tee "$RUNNER_TEMP/verify-locks.txt"
+      # The LAN containment test binds a real socket to a real host address, so the branch
+      # it asserts depends on the peer this runner presents to that address. Record those
+      # facts as a notice annotation, readable from the API without fetching job logs.
+      - name: Record the peers this runner presents to its own LAN addresses
+        run: |
+          set -o pipefail
+          python - <<'PY' | tee "$RUNNER_TEMP/lan-diagnostic.txt"
+          import socket
+          import subprocess
+          from ipaddress import IPv4Address
+
+          from poptrap.engine.delivery.security import list_lan_interfaces
+
+          for item in list_lan_interfaces():
+              address = str(item.address.ip)
+              route = subprocess.run(
+                  ["ip", "route", "get", address], capture_output=True, text=True, check=False,
+              ).stdout.strip().replace("\n", " ")
+              with socket.socket() as listener:
+                  listener.bind((address, 0))
+                  listener.listen(1)
+                  with socket.create_connection(listener.getsockname(), timeout=2) as probe:
+                      selected = probe.getsockname()[0]
+                      accepted, _ = listener.accept()
+                      observed = accepted.getpeername()[0]
+                      accepted.close()
+              inside = IPv4Address(observed) in item.address.network
+              print(f"{item.label} | route: {route} | src: {selected} | peer: {observed} | in-subnet: {inside}")
+          PY
+          python - <<'PY'
+          import os
+          from pathlib import Path
+
+          text = (Path(os.environ["RUNNER_TEMP"]) / "lan-diagnostic.txt").read_text()
+          text = text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+          print(f"::notice title=LAN boundary facts::{text[:900]}")
+          PY
+      - name: Regression tests
+        run: |
+          set -o pipefail
+          python -m pytest -q -rf -rs --tb=short 2>&1 | tee "$RUNNER_TEMP/pytest.txt"
+      - name: Web component tests
+        run: |
+          set -o pipefail
+          node --test tests/web/*.mjs 2>&1 | tee "$RUNNER_TEMP/node.txt"
       - name: Build and verify locally
         run: |
           python tools/build_release.py --epoch 1794960000 --output "$RUNNER_TEMP/poptrap-build"
@@ -35,3 +85,75 @@ jobs:
           poptrap-installed/bin/python -m pip install --no-deps poptrap-build/*.whl
           poptrap-installed/bin/python -m pip check
           poptrap-installed/bin/python -I "$GITHUB_WORKSPACE/tools/check_install.py"
+      - name: Verify the documented fresh-install flow end to end
+        run: |
+          set -o pipefail
+          python tools/verify_install.py --stages fresh --workdir "$RUNNER_TEMP/poptrap-verify" 2>&1 | tee "$RUNNER_TEMP/verify-fresh.txt"
+      # Record what this run actually verified, because job logs are awkward to reach
+      # from the API and the documentation quotes these totals as evidence.
+      - name: Record the verified totals
+        if: success()
+        run: |
+          python - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          temp = Path(os.environ["RUNNER_TEMP"])
+
+          def read(name: str) -> str:
+              path = temp / name
+              return path.read_text(encoding="utf-8", errors="replace") if path.is_file() else ""
+
+          facts = []
+          pytest_text = read("pytest.txt")
+          totals = [line for line in pytest_text.splitlines() if re.search(r"\b(passed|failed|error)\b.* in \d", line)]
+          if totals:
+              facts.append("pytest: " + totals[-1].strip())
+          facts += ["pytest skip: " + line.split("] ", 1)[-1] for line in pytest_text.splitlines() if line.startswith("SKIPPED")]
+          node_pass = [line for line in read("node.txt").splitlines() if line.startswith(("# pass", "# fail"))]
+          if node_pass:
+              facts.append("node: " + ", ".join(line.lstrip("# ").strip() for line in node_pass))
+          for name, label in (("verify-locks.txt", "locks"), ("verify-fresh.txt", "fresh install")):
+              verified = re.findall(r"\d+/\d+ passed[^\n]*", read(name))
+              if verified:
+                  facts.append(f"{label}: {verified[-1].strip()}")
+          text = " | ".join(facts)
+          text = text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+          print(f"::notice title=Verified totals::{text[:900]}")
+          PY
+      # Job logs are awkward to reach from the API, so a failing run also reports
+      # the relevant tail of each captured log as a check annotation.
+      - name: Surface failures as annotations
+        if: failure()
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+
+          temp = Path(os.environ["RUNNER_TEMP"])
+
+          def emit(title: str, body: str) -> None:
+              body = "\n".join(body.splitlines()[-140:]) or "no captured output"
+              body = body.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+              print(f"::error title={title}::{body}")
+
+          captured = {
+              "pytest.txt": "pytest failures",
+              "verify-locks.txt": "lock and platform verification failures",
+              "verify-fresh.txt": "fresh-install verification failures",
+              "node.txt": "web component test failures",
+          }
+          for name, title in captured.items():
+              path = temp / name
+              if not path.is_file():
+                  continue
+              text = path.read_text(encoding="utf-8", errors="replace")
+              if name == "pytest.txt" and "= FAILURES =" in text:
+                  emit(title, text[text.index("= FAILURES ="):])
+              elif "[FAIL]" in text or "# fail" in text:
+                  emit(title, "\n".join(
+                      line for line in text.splitlines()
+                      if "[FAIL]" in line or line.startswith("# fail") or "verification:" in line
+                  ))
+          PY

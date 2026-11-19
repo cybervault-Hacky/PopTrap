@@ -1,4 +1,21 @@
-# POPTRAP — Runtime Dependencies (Python 3.11+)
+# POPTRAP — dependency ranges for development and ad-hoc installs (Python 3.11+).
+#
+# This file is NOT the supported installation source. It resolves to whatever PyPI
+# publishes at install time, so it drifts from the verified profile: it currently
+# resolves fastapi 0.165.0 while requirements/runtime.lock pins fastapi 0.164.0.
+#
+# Supported, reproducible, hash-verified install (run in an activated Python 3.11
+# virtual environment, from the repository or bundle root):
+#
+#     python -m pip install --require-hashes --only-binary=:all: -r requirements/runtime.lock
+#
+#   requirements/runtime.lock  verified runtime profile (installs and releases)
+#   requirements/test.lock     runtime + test tooling    (contributor regression runs)
+#   requirements/build.lock    pinned build backend      (sdist and wheel builds)
+#
+# The ranges below must stay consistent with pyproject.toml, and every lock pin must
+# satisfy them; tests/test_installation.py fails when they diverge.
+
 textual>=8.2.8,<9.0.0
 rich>=14.2.0,<15.0.0
 pydantic>=2.9.0,<3.0.0

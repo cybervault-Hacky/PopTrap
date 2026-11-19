@@ -59,7 +59,12 @@ class PlatformInfo:
 
     @property
     def is_supported_os(self) -> bool:
-        """Return True when the detected OS is a supported POPTRAP target."""
+        """Return True when POPTRAP recognizes the detected OS.
+
+        Recognition is not a support or verification claim. Only Linux x86_64 with
+        CPython 3.11 is verified; Windows and macOS have install instructions only,
+        and Termux is recognized but unsupported. See ``docs/compatibility.md``.
+        """
         return self.os_type is not OperatingSystem.UNKNOWN
 
     @property
@@ -345,7 +350,8 @@ def detect_terminal_capabilities(
     if not pinfo.is_supported_os:
         warnings.append(
             f"Unrecognized operating system '{pinfo.system_name}'. "
-            "POPTRAP targets Linux, macOS, Windows, and Termux."
+            "POPTRAP is verified on Linux x86_64; Windows and macOS install instructions "
+            "are provided but unverified, and Android Termux is not a supported target."
         )
 
     if not supports_unicode:

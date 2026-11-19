@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import shutil
+import socket
 import subprocess
-from ipaddress import IPv4Interface
+from ipaddress import IPv4Address, IPv4Interface
 from pathlib import Path
 
 import httpx
@@ -239,8 +240,35 @@ def test_real_lan_listener_requires_opt_in_and_binds_exact_assigned_address():
         endpoint = delivery.start(interface, lan_confirmed=True)
         assert (endpoint.interface, endpoint.host) == (interface, str(interface.address.ip))
         assert delivery._socket.getsockname() == (endpoint.host, endpoint.port)
+        # The listener judges a request by the peer address it observes, which is not
+        # necessarily the source the client asked the kernel for: NAT rewrites it. On a
+        # GitHub Actions runner a connection to docker0's 172.17.0.1 arrives from the
+        # runner's own eth0 address (observed 10.1.0.81), outside 172.17.0.0/16, so the
+        # containment boundary must refuse it; on an ordinary LAN machine the peer stays
+        # inside the subnet and the request is served. Measure what a listener bound to
+        # the same address really observes and assert the contract for this host instead
+        # of assuming one. The in-subnet accept path is also covered deterministically by
+        # test_cors_and_subnet_checks_ignore_forwarded_peer_metadata and the real
+        # loopback listener above.
+        with socket.socket() as throwaway:
+            throwaway.bind((endpoint.host, 0))
+            throwaway.listen(1)
+            with socket.create_connection(throwaway.getsockname(), timeout=2):
+                observed, _ = throwaway.accept()
+            peer = IPv4Address(observed.getpeername()[0])
+            observed.close()
         with httpx.Client(trust_env=False, timeout=2) as http:
-            assert http.get(endpoint.origin + "/availability").status_code == 200
+            response = http.get(endpoint.origin + "/availability")
+            facts = (
+                f"interface={interface.label} subnet={interface.address.network} "
+                f"observed-peer={peer} host-header={response.request.headers.get('host')!r} "
+                f"authority={endpoint.authority!r} status={response.status_code} body={response.text[:160]!r}"
+            )
+            if peer in interface.address.network:
+                assert response.status_code == 200, facts
+            else:
+                assert response.status_code == 403, facts
+                assert "limited to its selected local address and subnet" in response.text, facts
             with pytest.raises(httpx.ConnectError):
                 http.get(f"http://127.0.0.1:{endpoint.port}/availability")
         with pytest.raises(DeliveryError, match="Stop the current"):
