@@ -68,7 +68,7 @@ jobs:
       - name: Regression tests
         run: |
           set -o pipefail
-          python -m pytest -q -rf --tb=short 2>&1 | tee "$RUNNER_TEMP/pytest.txt"
+          python -m pytest -q -rf -rs --tb=short 2>&1 | tee "$RUNNER_TEMP/pytest.txt"
       - name: Web component tests
         run: |
           set -o pipefail
@@ -89,6 +89,39 @@ jobs:
         run: |
           set -o pipefail
           python tools/verify_install.py --stages fresh --workdir "$RUNNER_TEMP/poptrap-verify" 2>&1 | tee "$RUNNER_TEMP/verify-fresh.txt"
+      # Record what this run actually verified, because job logs are awkward to reach
+      # from the API and the documentation quotes these totals as evidence.
+      - name: Record the verified totals
+        if: success()
+        run: |
+          python - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          temp = Path(os.environ["RUNNER_TEMP"])
+
+          def read(name: str) -> str:
+              path = temp / name
+              return path.read_text(encoding="utf-8", errors="replace") if path.is_file() else ""
+
+          facts = []
+          pytest_text = read("pytest.txt")
+          totals = [line for line in pytest_text.splitlines() if re.search(r"\b(passed|failed|error)\b.* in \d", line)]
+          if totals:
+              facts.append("pytest: " + totals[-1].strip())
+          facts += ["pytest skip: " + line.split("] ", 1)[-1] for line in pytest_text.splitlines() if line.startswith("SKIPPED")]
+          node_pass = [line for line in read("node.txt").splitlines() if line.startswith(("# pass", "# fail"))]
+          if node_pass:
+              facts.append("node: " + ", ".join(line.lstrip("# ").strip() for line in node_pass))
+          for name, label in (("verify-locks.txt", "locks"), ("verify-fresh.txt", "fresh install")):
+              verified = re.findall(r"\d+/\d+ passed[^\n]*", read(name))
+              if verified:
+                  facts.append(f"{label}: {verified[-1].strip()}")
+          text = " | ".join(facts)
+          text = text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+          print(f"::notice title=Verified totals::{text[:900]}")
+          PY
       # Job logs are awkward to reach from the API, so a failing run also reports
       # the relevant tail of each captured log as a check annotation.
       - name: Surface failures as annotations
