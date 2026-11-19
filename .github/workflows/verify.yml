@@ -21,13 +21,21 @@ jobs:
           node-version: '22'
       # Quoted: "--only-binary=:all: -r" contains ": ", which is illegal inside an
       # unquoted YAML plain scalar and made GitHub reject this workflow before any
-      # job was created (every run failed in 0s).
+      # job was created (every earlier run failed in 0s with no log).
       - run: 'python -m pip install --require-hashes --only-binary=:all: -r requirements/test.lock -r requirements/build.lock'
       - run: python -m pip check
       - name: Verify lock hashes and per-platform wheel availability
-        run: python tools/verify_install.py --stages structure,hashes,platforms
-      - run: python -m pytest -q
-      - run: node --test tests/web/*.mjs
+        run: |
+          set -o pipefail
+          python tools/verify_install.py --stages structure,hashes,platforms 2>&1 | tee "$RUNNER_TEMP/verify-locks.txt"
+      - name: Regression tests
+        run: |
+          set -o pipefail
+          python -m pytest -q -rf --tb=short 2>&1 | tee "$RUNNER_TEMP/pytest.txt"
+      - name: Web component tests
+        run: |
+          set -o pipefail
+          node --test tests/web/*.mjs 2>&1 | tee "$RUNNER_TEMP/node.txt"
       - name: Build and verify locally
         run: |
           python tools/build_release.py --epoch 1794960000 --output "$RUNNER_TEMP/poptrap-build"
@@ -41,4 +49,41 @@ jobs:
           poptrap-installed/bin/python -m pip check
           poptrap-installed/bin/python -I "$GITHUB_WORKSPACE/tools/check_install.py"
       - name: Verify the documented fresh-install flow end to end
-        run: python tools/verify_install.py --stages fresh --workdir "$RUNNER_TEMP/poptrap-verify"
+        run: |
+          set -o pipefail
+          python tools/verify_install.py --stages fresh --workdir "$RUNNER_TEMP/poptrap-verify" 2>&1 | tee "$RUNNER_TEMP/verify-fresh.txt"
+      # Job logs are awkward to reach from the API, so a failing run also reports
+      # the relevant tail of each captured log as a check annotation.
+      - name: Surface failures as annotations
+        if: failure()
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+
+          temp = Path(os.environ["RUNNER_TEMP"])
+
+          def emit(title: str, body: str) -> None:
+              body = "\n".join(body.splitlines()[-140:]) or "no captured output"
+              body = body.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+              print(f"::error title={title}::{body}")
+
+          captured = {
+              "pytest.txt": "pytest failures",
+              "verify-locks.txt": "lock and platform verification failures",
+              "verify-fresh.txt": "fresh-install verification failures",
+              "node.txt": "web component test failures",
+          }
+          for name, title in captured.items():
+              path = temp / name
+              if not path.is_file():
+                  continue
+              text = path.read_text(encoding="utf-8", errors="replace")
+              if name == "pytest.txt" and "= FAILURES =" in text:
+                  emit(title, text[text.index("= FAILURES ="):])
+              elif "[FAIL]" in text or "# fail" in text:
+                  emit(title, "\n".join(
+                      line for line in text.splitlines()
+                      if "[FAIL]" in line or line.startswith("# fail") or "verification:" in line
+                  ))
+          PY
