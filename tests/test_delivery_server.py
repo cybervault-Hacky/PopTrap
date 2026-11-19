@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import shutil
+import socket
 import subprocess
-from ipaddress import IPv4Interface
+from ipaddress import IPv4Address, IPv4Interface
 from pathlib import Path
 
 import httpx
@@ -239,8 +240,27 @@ def test_real_lan_listener_requires_opt_in_and_binds_exact_assigned_address():
         endpoint = delivery.start(interface, lan_confirmed=True)
         assert (endpoint.interface, endpoint.host) == (interface, str(interface.address.ip))
         assert delivery._socket.getsockname() == (endpoint.host, endpoint.port)
+        # The kernel picks the source address a same-host connection presents to the
+        # listener. On an ordinary LAN machine it falls inside the interface subnet, so
+        # the request is served. On a Docker bridge such as GitHub Actions' docker0 the
+        # route to that address goes through loopback, so the peer is 127.0.0.1 and the
+        # containment boundary must refuse it. Assert whichever the host produces
+        # instead of assuming one; the in-subnet accept path is covered deterministically
+        # by test_cors_and_subnet_checks_ignore_forwarded_peer_metadata and the real
+        # loopback listener above.
+        with socket.socket() as throwaway:
+            throwaway.bind((endpoint.host, 0))
+            throwaway.listen(1)
+            with socket.create_connection(throwaway.getsockname(), timeout=2) as probe:
+                peer = IPv4Address(probe.getsockname()[0])
+                throwaway.accept()[0].close()
         with httpx.Client(trust_env=False, timeout=2) as http:
-            assert http.get(endpoint.origin + "/availability").status_code == 200
+            if peer in interface.address.network:
+                assert http.get(endpoint.origin + "/availability").status_code == 200
+            else:
+                refused = http.get(endpoint.origin + "/availability")
+                assert refused.status_code == 403
+                assert "limited to its selected local address and subnet" in refused.text
             with pytest.raises(httpx.ConnectError):
                 http.get(f"http://127.0.0.1:{endpoint.port}/availability")
         with pytest.raises(DeliveryError, match="Stop the current"):
