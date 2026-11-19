@@ -196,6 +196,8 @@
     var disconnectHandler = null;
     var pagehideHandler = null;
     var destroyed = false;
+    var operation = 0;
+    var connecting = false;
     var connectionState = "disconnected";
     var lastReason = "No Web Bluetooth device connected.";
 
@@ -221,6 +223,7 @@
     }
 
     function cleanupGatt(nextState, reason) {
+      operation++;
       var device = activeDevice;
       var server = activeServer;
       detachDeviceListeners();
@@ -341,14 +344,21 @@
         );
       }
 
+      if (connecting) return Promise.reject(new Error("A device selection is already pending."));
+      connecting = true;
+      var generation = operation;
+      var interrupted = function () { return destroyed || generation !== operation; };
       return inspectSupport().then(function (support) {
+        if (interrupted()) throw new Error("Device selection was interrupted.");
         if (support.state !== CAPABILITY_STATES.AVAILABLE) {
           var err = new Error(support.reason);
           err.capabilityState = support.state;
           throw err;
         }
 
+        if (nav.userActivation?.isActive === false) throw new Error("Choose the device again using an explicit browser action.");
         cleanupGatt("connecting", "Opening browser Bluetooth permission chooser...");
+        generation = operation;
 
         /* Request ONLY the dedicated POPTRAP BLE invitation service — never acceptAllDevices. */
         var filterOptions = {
@@ -359,8 +369,8 @@
         return nav.bluetooth
           .requestDevice(filterOptions)
           .then(function (device) {
+            if (interrupted()) throw new Error("Device selection was interrupted.");
             if (!device || !device.gatt || typeof device.gatt.connect !== "function") {
-              cleanupGatt("failed", "Selected device does not expose a compatible BLE GATT server.");
               throw new Error("Selected device does not expose a compatible BLE GATT server.");
             }
 
@@ -373,8 +383,11 @@
             }
 
             return device.gatt.connect().then(function (server) {
+              if (interrupted()) {
+                if (server?.connected) server.disconnect();
+                throw new Error("Device connection was interrupted.");
+              }
               if (!server || server.connected !== true) {
-                cleanupGatt("failed", "Browser did not confirm an active BLE GATT connection.");
                 throw new Error("Browser did not confirm an active BLE GATT connection.");
               }
               activeServer = server;
@@ -385,6 +398,7 @@
             });
           })
           .catch(function (err) {
+            if (interrupted()) throw err;
             var classified = classifyDomError(err);
             var next = classified.state === "cancelled" ? "disconnected" : "failed";
             cleanupGatt(next, classified.message);
@@ -393,7 +407,7 @@
             out.capabilityState = classified.state;
             throw out;
           });
-      });
+      }).finally(function () { connecting = false; });
     }
 
     function writeInvitation(rawInvitationJson, actionOptions) {
@@ -416,27 +430,32 @@
         return Promise.reject(validationErr);
       }
 
+      var generation = operation;
+      var assertCurrent = function () {
+        if (generation !== operation || !activeServer?.connected) throw new Error("Device connection changed.");
+      };
       return activeServer
         .getPrimaryService(POPTRAP_INVITE_SERVICE_UUID)
         .then(function (service) {
+          assertCurrent();
           /* Access strictly the single invitation characteristic — zero private device characteristics. */
           return service.getCharacteristic(POPTRAP_INVITE_CHAR_UUID);
         })
         .then(function (characteristic) {
+          assertCurrent();
           if (typeof characteristic.writeValueWithResponse === "function") {
             return characteristic.writeValueWithResponse(payloadBytes);
-          }
-          if (typeof characteristic.writeValue === "function") {
-            return characteristic.writeValue(payloadBytes);
           }
           throw new Error("Invitation characteristic does not support confirmed writes.");
         })
         .then(function () {
+          assertCurrent();
           lastReason = "Invitation written with GATT response confirmation.";
           emit();
           return { delivered: true, bytesSent: payloadBytes.byteLength };
         })
         .catch(function (err) {
+          if (generation !== operation) throw err;
           var info = classifyDomError(err);
           if (!activeServer || activeServer.connected !== true) {
             cleanupGatt("lost", info.message);
@@ -469,7 +488,7 @@
           : null;
 
       return {
-        state: isConfirmed ? "connected" : connectionState,
+        state: connectionState === "connected" && !isConfirmed ? "lost" : connectionState,
         confirmed: isConfirmed,
         deviceName: isConfirmed ? reportedName : null,
         transport: isConfirmed ? "web_bluetooth_gatt" : "none",

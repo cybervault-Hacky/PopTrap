@@ -276,6 +276,8 @@ class BluetoothEngine:
             raise_for_capability(report.invitation_transport, operation="connection")
 
         device = self._discovery.get_device(address)
+        if device is not None and device.paired is False:
+            raise BluetoothConnectionError("Pair with the selected device in the OS before connecting.")
         snap = self._connections.connect(
             address,
             user_confirmed=True,
@@ -356,36 +358,25 @@ class BluetoothEngine:
                 or not conn.confirmed
                 or conn.device_address != resolved_target
             ):
-                device = self._discovery.get_device(resolved_target)
-                conn = self._connections.connect(
-                    resolved_target,
-                    user_confirmed=True,
-                    device_name=device.name if device is not None else None,
-                    channel=channel,
-                    timeout=timeout_seconds,
+                self.connect_device(
+                    resolved_target, user_confirmed=True, channel=channel, timeout_seconds=timeout_seconds,
                 )
-                self._discovery.update_device_connected(resolved_target, True)
 
             self._connections.send_invitation_payload(
                 record.envelope.invitation_id,
                 wire_bytes,
+                expected_address=resolved_target,
                 timeout=timeout_seconds,
             )
             sent = self._invitations.mark_sent(
                 record.envelope.invitation_id, delivery_confirmed=True
             )
-            self._logger.info(
-                "Bluetooth invitation delivered: id=%s session=%s target=%s bytes=%d",
-                sent.envelope.invitation_id,
-                sent.envelope.session_ref,
-                resolved_target,
-                sent.payload_size_bytes,
-            )
+            self._logger.info("Bluetooth invitation acknowledged: bytes=%d", sent.payload_size_bytes)
             return sent
         except Exception:
             # Never leave a failed transmission as pending or falsely sent.
             try:
-                self._invitations.cancel_invitation(record.envelope.invitation_id)
+                self._invitations.cancel_invitation(record.envelope.invitation_id, revoked=False)
             except Exception:  # noqa: BLE001
                 pass
             raise
@@ -404,9 +395,7 @@ class BluetoothEngine:
     def cancel_invitation(self, invitation_id: str) -> InvitationRecord:
         """Explicitly cancel a pending or sent invitation."""
         cancelled = self._invitations.cancel_invitation(invitation_id)
-        self._logger.info(
-            "Bluetooth invitation cancelled: id=%s", cancelled.envelope.invitation_id
-        )
+        self._logger.info("Bluetooth invitation cancelled.")
         return cancelled
 
     def list_invitations(

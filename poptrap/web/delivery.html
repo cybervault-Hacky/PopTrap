@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="referrer" content="no-referrer">
+  <meta name="color-scheme" content="dark">
+  <title>POPTRAP — Opt-in Simulation Delivery</title>
+  <link rel="stylesheet" href="/static/styles/themes.css">
+  <link rel="stylesheet" href="/static/styles/base.css">
+  <link rel="stylesheet" href="/static/styles/responsive.css">
+  <link rel="stylesheet" href="/static/styles/delivery.css">
+  <script src="/static/scripts/delivery.js" defer></script>
+</head>
+<body class="recipient-page">
+  <header class="safety-bar" aria-label="Simulation safety controls">
+    <div class="safety-brand">
+      <span class="brand-mark">POPTRAP</span>
+      <span class="sim-pill">SIMULATION</span>
+    </div>
+    <div class="safety-controls">
+      <button id="delivery-exit" class="bar-btn bar-btn-exit" type="button">Exit</button>
+    </div>
+  </header>
+  <main class="app-main">
+    <section class="view-panel" aria-labelledby="delivery-title">
+      <div class="card delivery-card">
+        <p class="eyebrow">OPT-IN DELIVERY / LOCAL ONLY</p>
+        <h1 id="delivery-title" class="card-title">Simulation invitation</h1>
+        <p id="delivery-status" class="meta-line" role="status">Checking the link…</p>
+        <noscript><p>JavaScript is required to review an invitation. Nothing has been started.</p></noscript>
+        <section id="delivery-join" hidden class="is-hidden" aria-label="Device availability">
+          <p class="consent-note">
+            Advertise this browser to the creator on your local network. Only your optional display
+            name and availability are shared. Keep this tab open and visible to check for invitations.
+            Nothing runs unless you accept an invitation and then launch it yourself.
+          </p>
+          <p class="meta-line">Local HTTP is not encrypted. Use this only on a trusted network.</p>
+          <form id="delivery-join-form">
+            <label for="delivery-name">Display name (optional)</label>
+            <input id="delivery-name" type="text" maxlength="32" autocomplete="off" enterkeyhint="go" placeholder="e.g. Living room tablet">
+            <div class="action-row">
+              <button class="btn btn-primary" id="delivery-announce" type="submit">Advertise availability</button>
+              <button class="btn btn-secondary is-hidden" id="delivery-withdraw" hidden type="button">Stop availability</button>
+            </div>
+          </form>
+        </section>
+        <section id="delivery-invite" hidden class="is-hidden" aria-labelledby="delivery-experience">
+          <h2 id="delivery-experience" class="card-title"></h2>
+          <p id="delivery-summary" class="consent-note"></p>
+          <p id="delivery-details" class="meta-line"></p>
+          <p class="consent-note">This is a browser-only visual simulation. Accept opens the launch screen; it does not start the simulation. You can use Exit or Esc at any time.</p>
+          <div class="action-row">
+            <button class="btn btn-primary" id="delivery-accept" type="button">Accept</button>
+            <button class="btn btn-secondary" id="delivery-decline" type="button">Decline</button>
+          </div>
+        </section>
+        <div class="entry-footer">
+          <a class="btn btn-secondary" href="/scan">QR &amp; device check</a>
+        </div>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

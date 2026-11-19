@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="referrer" content="no-referrer">
+  <meta name="color-scheme" content="dark">
+  <title>POPTRAP — QR &amp; device check</title>
+  <link rel="stylesheet" href="/static/styles/themes.css">
+  <link rel="stylesheet" href="/static/styles/base.css">
+  <link rel="stylesheet" href="/static/styles/responsive.css">
+  <link rel="stylesheet" href="/static/styles/delivery.css">
+  <link rel="stylesheet" href="/static/styles/scan.css">
+  <script src="/static/scripts/scan.js" defer></script>
+</head>
+<body class="recipient-page">
+  <header class="safety-bar" aria-label="QR helper controls">
+    <div class="safety-brand">
+      <span class="brand-mark">POPTRAP</span>
+      <span class="sim-pill">SIMULATION</span>
+    </div>
+    <div class="safety-controls">
+      <button id="scan-exit" class="bar-btn bar-btn-exit" type="button">Exit</button>
+    </div>
+  </header>
+  <main class="app-main">
+    <section class="view-panel scan-panel" aria-labelledby="scan-title">
+      <div class="scan-layout">
+        <div class="card delivery-card scan-card">
+          <p class="eyebrow">RECIPIENT TOOLS / LOCAL ONLY</p>
+          <h1 id="scan-title" class="card-title">Open an invitation</h1>
+          <p class="meta-line">Use a POPTRAP QR code or paste a link for this listener. Review the details before accepting. Nothing starts here.</p>
+          <noscript><p>JavaScript is required for this helper. You can still open the original link directly.</p></noscript>
+
+          <div class="scan-method">
+            <h2 class="scan-heading">Read a QR code</h2>
+            <p id="scan-camera-hint" class="meta-line">Camera access is requested only when you choose Start camera.</p>
+            <div class="action-row">
+              <button id="scan-camera" class="btn btn-secondary" type="button" aria-describedby="scan-camera-hint">Start camera</button>
+              <button id="scan-stop" class="btn btn-secondary is-hidden" type="button">Stop camera</button>
+              <label class="scan-file-control">
+                <input id="scan-file" class="sr-only" type="file" accept="image/png,image/jpeg" aria-describedby="scan-file-hint">
+                <span class="btn btn-secondary">Choose QR image</span>
+              </label>
+            </div>
+            <p id="scan-file-hint" class="scan-hint">PNG or JPEG, up to 8 MiB and 16 megapixels. Nothing is uploaded.</p>
+            <video id="scan-video" class="scan-video is-hidden" playsinline muted autoplay aria-label="Local camera view"></video>
+          </div>
+
+          <form id="scan-form" class="scan-method" novalidate>
+            <h2 class="scan-heading">Or paste an invitation link</h2>
+            <label class="sr-only" for="scan-url">Full POPTRAP invitation URL</label>
+            <input id="scan-url" type="url" maxlength="256" placeholder="http://…/invite#…" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" enterkeyhint="go">
+            <button id="scan-review" class="btn btn-primary" type="submit">Review invitation</button>
+          </form>
+          <p id="scan-status" class="scan-status" role="status" tabindex="-1">Choose a QR source or enter the invitation URL.</p>
+        </div>
+
+        <div class="card scan-card scan-report" aria-labelledby="scan-report-title">
+          <p class="eyebrow">ON-DEVICE REPORT</p>
+          <h2 id="scan-report-title" class="card-title">Browser compatibility</h2>
+          <p class="meta-line">API and connection hints only. No hardware scan, connection test, or telemetry.</p>
+          <dl id="scan-report" class="scan-report-grid">
+            <dt>Browser</dt><dd id="scan-report-browser">—</dd>
+            <dt>Platform</dt><dd id="scan-report-platform">—</dd>
+            <dt>Viewport</dt><dd id="scan-report-viewport">—</dd>
+            <dt>Reduced motion</dt><dd id="scan-report-motion">—</dd>
+            <dt>WebSocket</dt><dd id="scan-report-socket">—</dd>
+            <dt>Web Bluetooth</dt><dd id="scan-report-bluetooth">—</dd>
+            <dt>Camera</dt><dd id="scan-report-camera">—</dd>
+            <dt>Network</dt><dd id="scan-report-network">—</dd>
+          </dl>
+          <button id="scan-refresh" type="button" class="btn btn-secondary" aria-describedby="scan-report-hint">Refresh report</button>
+          <p id="scan-report-hint" class="scan-hint">Refresh checks permission status when supported. It does not prompt for access.</p>
+          <p id="scan-report-status" class="sr-only" role="status"></p>
+        </div>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

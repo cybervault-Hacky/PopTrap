@@ -22,10 +22,11 @@ from poptrap.engine.studio import (
 )
 from poptrap.ui.screens import (
     CreatePrankScreen,
+    LocalNetworkScreen,
     MainMenuScreen,
-    ModuleStatusScreen,
     PrankStudioScreen,
     PresetManagerScreen,
+    ShareLinkScreen,
 )
 from poptrap.utils.platform import detect_platform, detect_terminal_capabilities
 
@@ -53,7 +54,7 @@ def _make_studio_app(tmp_path: Path) -> PopTrapApp:
 
 
 class TestMenuIntegrationAndNavigation:
-    async def test_main_menu_retains_exact_six_items_and_unavailable_modules(
+    async def test_main_menu_retains_exact_six_items_with_delivery(
         self, tmp_path: Path
     ) -> None:
         app = _make_studio_app(tmp_path)
@@ -63,11 +64,11 @@ class TestMenuIntegrationAndNavigation:
             menu = app.screen.query_one("#main-menu-list", OptionList)
             assert menu.option_count == 6
 
-            # Unimplemented delivery modules remain clearly unavailable.
-            for key in ("3", "4"):
+            # Phase 6 uses the existing two menu entries without adding to the menu.
+            for key, screen in (("3", ShareLinkScreen), ("4", LocalNetworkScreen)):
                 await pilot.press(key)
                 await pilot.pause()
-                assert isinstance(app.screen, ModuleStatusScreen)
+                assert isinstance(app.screen, screen)
                 await pilot.press("escape")
                 await pilot.pause()
                 assert isinstance(app.screen, MainMenuScreen)

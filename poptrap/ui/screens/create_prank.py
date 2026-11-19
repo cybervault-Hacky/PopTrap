@@ -106,19 +106,19 @@ class PrankPreviewScreen(BasePopTrapScreen):
                 with VerticalScroll(id="preview-scroll", can_focus=True):
                     with Horizontal(classes="preview-row"):
                         yield Static(t("prank.display_title", lang), classes="preview-key")
-                        yield Static(cfg.title, classes="preview-val-accent", id="preview-title-val")
+                        yield Static(cfg.title, classes="preview-val-accent", id="preview-title-val", markup=False)
                     with Horizontal(classes="preview-row"):
                         yield Static(t("prank.message", lang), classes="preview-key")
-                        yield Static(cfg.custom_message, classes="preview-val", id="preview-msg-val")
+                        yield Static(cfg.custom_message, classes="preview-val", id="preview-msg-val", markup=False)
                     with Horizontal(classes="preview-row"):
                         yield Static(t("prank.reveal", lang), classes="preview-key")
-                        yield Static(cfg.reveal_message, classes="preview-val", id="preview-reveal-val")
+                        yield Static(cfg.reveal_message, classes="preview-val", id="preview-reveal-val", markup=False)
                     with Horizontal(classes="preview-row"):
                         yield Static(t("prank.preview_params", lang), classes="preview-key")
                         yield Static(params_text, classes="preview-val", id="preview-params-val")
                     with Horizontal(classes="preview-row"):
                         yield Static(t("prank.preview_stages", lang), classes="preview-key")
-                        yield Static(stage_lines, classes="preview-val", id="preview-stages-val")
+                        yield Static(stage_lines, classes="preview-val", id="preview-stages-val", markup=False)
                     with Horizontal(classes="preview-row"):
                         yield Static(t("prank.preview_safety", lang), classes="preview-key")
                         yield Static(safety_text, classes="preview-val", id="preview-safety-val")
@@ -366,15 +366,15 @@ class CreatePrankScreen(BasePopTrapScreen):
                 with Vertical(id="session-panel", classes="hidden"):
                     with Horizontal(classes="session-line"):
                         yield Static(t("prank.server_addr", lang), classes="session-key")
-                        yield Static("", classes="session-val", id="val-server-url")
+                        yield Static("", classes="session-val", id="val-server-url", markup=False)
                     with Horizontal(classes="session-line"):
                         yield Static(t("prank.session_url", lang), classes="session-key")
-                        yield Static("", classes="session-url", id="val-session-url")
+                        yield Static("", classes="session-url", id="val-session-url", markup=False)
                     with Horizontal(classes="session-line"):
                         yield Static(t("prank.session_state", lang), classes="session-key")
                         yield Static("", classes="session-val", id="val-session-state")
 
-                yield Static("", id="prank-feedback")
+                yield Static("", id="prank-feedback", markup=False)
 
                 with Horizontal(classes="prank-actions"):
                     yield Button(

@@ -519,8 +519,6 @@ html[data-theme="neon"] .finding-card:nth-child(even) {
   width: 100%;
   max-width: 1020px;
   min-width: 0;
-  min-height: calc(100vh - var(--bar-height) - 48px);
-  min-height: calc(100dvh - var(--bar-height) - 48px);
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
@@ -599,6 +597,7 @@ html[data-theme="neon"] .finding-card:nth-child(even) {
   left: 0;
   top: 0;
   width: min(288px, calc(100% - 32px));
+  min-width: 0;
   background-color: var(--surface);
   border: 1px solid var(--border);
   border-top: 2px solid var(--accent);
@@ -606,7 +605,6 @@ html[data-theme="neon"] .finding-card:nth-child(even) {
   padding: var(--space-3) var(--space-4);
   box-shadow: var(--shadow-popup);
   transform: translate3d(var(--card-x), var(--card-y), 0) scale(1);
-  will-change: transform, opacity;
   animation: fx-popup-in var(--popup-enter-ms, 220ms) var(--ease-out) both;
   transition: transform var(--popup-exit-ms, 190ms) var(--ease-out),
     opacity var(--popup-exit-ms, 190ms) var(--ease-out),
@@ -628,11 +626,11 @@ html[data-theme="neon"] .popup-card:nth-child(even) {
 }
 
 .storm-arena.is-stacked {
+  min-height: 140px;
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
-  overflow-y: auto;
-  overflow-x: hidden;
+  overflow: visible;
 }
 
 .storm-arena.is-stacked .popup-card {
@@ -649,7 +647,7 @@ html[data-theme="neon"] .popup-card:nth-child(even) {
 
 .storm-arena.is-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(220px, 100%), 1fr));
   align-content: start;
   gap: var(--space-3);
   overflow-y: auto;
@@ -981,4 +979,14 @@ html[data-theme="neon"] .countdown-wrap.phase-elevated .countdown-ring-fg {
 .sequence-pct {
   color: var(--accent);
   font-weight: 600;
+}
+
+/* Do not promote large full-stage surfaces on phones/tablets. Progress,
+ * labels and the foreground effect still render normally. */
+@media (any-pointer: coarse), (max-width: 639px), (max-height: 520px) {
+  .fx-scanlines,
+  .scanner-sheen,
+  .glitch-flicker {
+    animation: none;
+  }
 }

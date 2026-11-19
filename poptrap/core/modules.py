@@ -1,4 +1,4 @@
-"""Authoritative registry of POPTRAP main menu modules and Phase 1 status.
+"""Authoritative registry of POPTRAP main menu modules and availability.
 
 Future-phase modules are explicitly marked ``UNAVAILABLE`` so the UI and
 application logic never fabricate functionality, devices, links, or sessions.
@@ -30,7 +30,7 @@ class ModuleAvailability(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class MenuModuleSpec:
-    """Metadata describing a main menu option and its Phase 1 availability."""
+    """Metadata describing a main menu option and its implementation status."""
 
     index: int
     module_id: ModuleId
@@ -40,7 +40,7 @@ class MenuModuleSpec:
 
     @property
     def is_available(self) -> bool:
-        """Return True when the module is genuinely implemented in Phase 1."""
+        """Return True when the module is genuinely implemented in this release."""
         return self.availability is ModuleAvailability.AVAILABLE
 
 
@@ -61,15 +61,13 @@ MAIN_MENU_MODULES: tuple[MenuModuleSpec, ...] = (
         index=3,
         module_id=ModuleId.QR_SHARE_LINK,
         label_key="menu.qr_share_link",
-        availability=ModuleAvailability.UNAVAILABLE,
-        detail_key="module.qr_share_link.detail",
+        availability=ModuleAvailability.AVAILABLE,
     ),
     MenuModuleSpec(
         index=4,
         module_id=ModuleId.LOCAL_NETWORK,
         label_key="menu.local_network",
-        availability=ModuleAvailability.UNAVAILABLE,
-        detail_key="module.local_network.detail",
+        availability=ModuleAvailability.AVAILABLE,
     ),
     MenuModuleSpec(
         index=5,

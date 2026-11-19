@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from poptrap.core.logging_setup import shutdown_logging
-from poptrap.utils.paths import ENV_CONFIG_DIR, ENV_LOG_DIR
+from poptrap.utils.paths import ENV_CONFIG_DIR, ENV_LOG_DIR, ENV_PRESETS_DIR
 
 
 @pytest.fixture(autouse=True)
@@ -21,5 +21,6 @@ def isolated_runtime_dirs(
     log_dir = tmp_path / "user_logs"
     monkeypatch.setenv(ENV_CONFIG_DIR, str(config_dir))
     monkeypatch.setenv(ENV_LOG_DIR, str(log_dir))
+    monkeypatch.setenv(ENV_PRESETS_DIR, str(tmp_path / "user_presets"))
     yield config_dir, log_dir
     shutdown_logging()

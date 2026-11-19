@@ -1,0 +1,37 @@
+name: Verify POPTRAP
+
+on: [push, pull_request]
+
+permissions:
+  contents: read
+
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '22'
+      - run: python -m pip install --require-hashes --only-binary=:all: -r requirements/test.lock -r requirements/build.lock
+      - run: python -m pip check
+      - run: python -m pytest -q
+      - run: node --test tests/web/*.mjs
+      - name: Build and verify locally
+        run: |
+          python tools/build_release.py --epoch 1794960000 --output "$RUNNER_TEMP/poptrap-build"
+          (cd "$RUNNER_TEMP/poptrap-build" && sha256sum -c SHA256SUMS)
+      - name: Smoke-test the installed wheel outside the checkout
+        run: |
+          python -m venv "$RUNNER_TEMP/poptrap-installed"
+          cd "$RUNNER_TEMP"
+          poptrap-installed/bin/python -m pip install --require-hashes --only-binary=:all: -r poptrap-build/runtime.lock
+          poptrap-installed/bin/python -m pip install --no-deps poptrap-build/*.whl
+          poptrap-installed/bin/python -m pip check
+          poptrap-installed/bin/python -I "$GITHUB_WORKSPACE/tools/check_install.py"

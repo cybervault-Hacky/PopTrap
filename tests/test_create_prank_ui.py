@@ -18,11 +18,13 @@ from poptrap.engine.models import (
 )
 from poptrap.ui.screens import (
     CreatePrankScreen,
+    LocalNetworkScreen,
     MainMenuScreen,
-    ModuleStatusScreen,
     PrankPreviewScreen,
+    ShareLinkScreen,
 )
 from poptrap.utils.platform import detect_platform, detect_terminal_capabilities
+from tests.runtime_http import DOCUMENT
 
 
 def _make_app(
@@ -165,7 +167,7 @@ class TestCreatePrankScreenWorkflow:
                 assert html.status_code == 200
                 consent = await client.post(
                     f"{server_url}/api/v1/sessions/{sid}/consent",
-                    json={"consent": True},
+                    headers={"Origin": server_url, **DOCUMENT}, json={"consent": True},
                 )
                 assert consent.status_code == 200
                 assert consent.json()["runtime"]["countdown_seconds"] == 14
@@ -203,17 +205,17 @@ class TestCreatePrankScreenWorkflow:
         assert app.prank_controller.active_session_count == 0
         assert app.prank_controller.stored_session_count == 0
 
-    async def test_future_delivery_options_remain_unavailable_in_phase2(
+    async def test_delivery_navigation_preserves_create_prank_menu(
         self, tmp_path: Path
     ) -> None:
         app = _make_app(tmp_path)
         async with app.run_test(size=(80, 24)) as pilot:
             await pilot.pause()
-            for key in ("3", "4"):
+            for key, screen in (("3", ShareLinkScreen), ("4", LocalNetworkScreen)):
                 await pilot.press(key)
                 await pilot.pause()
-                assert isinstance(app.screen, ModuleStatusScreen)
-                assert app.screen.module.is_available is False
+                assert isinstance(app.screen, screen)
+                assert app.delivery_server.manager is None
                 await pilot.press("escape")
                 await pilot.pause()
                 assert isinstance(app.screen, MainMenuScreen)

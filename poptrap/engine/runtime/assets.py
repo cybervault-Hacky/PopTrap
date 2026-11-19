@@ -15,16 +15,18 @@ _ALLOWED_EXTENSIONS: dict[str, str] = {
 
 SECURITY_HEADERS: dict[str, str] = {
     "Content-Security-Policy": (
-        "default-src 'self'; "
+        "default-src 'none'; "
         "script-src 'self'; "
         "style-src 'self'; "
         "img-src 'self' data:; "
-        "connect-src 'self' ws: wss:; "
+        "connect-src 'self'; "
         "media-src 'none'; "
         "object-src 'none'; "
         "base-uri 'none'; "
-        "form-action 'none'"
+        "form-action 'none'; frame-ancestors 'none'"
     ),
+    "X-Frame-Options": "DENY",
+    "Cross-Origin-Resource-Policy": "same-origin",
     "X-Content-Type-Options": "nosniff",
     "Referrer-Policy": "no-referrer",
     "Permissions-Policy": (

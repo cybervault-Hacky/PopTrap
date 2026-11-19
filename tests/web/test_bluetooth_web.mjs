@@ -382,3 +382,41 @@ test("Compatibility page binds cleanly and hides connect button on unsupported b
   assert.ok(elements["bt-web-limits"].children.length >= 4);
   client.destroy();
 });
+
+test("pagehide rejects late device selection without opening GATT", async () => {
+  const { PopTrapBluetooth, win } = loadBluetoothModule();
+  let selected;
+  win.navigator.bluetooth = { requestDevice: () => new Promise((resolve) => { selected = resolve; }) };
+  const client = PopTrapBluetooth.createClient({ window: win });
+  const pending = client.requestAndConnect({ userInitiated: true });
+  await new Promise((resolve) => setImmediate(resolve));
+  win.dispatch("pagehide");
+  selected({ gatt: { connect() { assert.fail("A disposed helper must not open a connection"); } } });
+  await assert.rejects(pending, /interrupted/);
+  assert.equal(win.countListeners(), 0);
+  assert.equal(client.getStatus().confirmed, false);
+});
+
+test("late GATT completion after pagehide is closed without restoring connected state", async () => {
+  const { PopTrapBluetooth, win } = loadBluetoothModule();
+  const listeners = new Set();
+  let resolveConnection;
+  const server = { connected: true, disconnect() { this.connected = false; } };
+  win.navigator.bluetooth = {
+    requestDevice: async () => ({
+      gatt: { connect: () => new Promise((resolve) => { resolveConnection = resolve; }) },
+      addEventListener(_event, fn) { listeners.add(fn); },
+      removeEventListener(_event, fn) { listeners.delete(fn); },
+    }),
+  };
+  const client = PopTrapBluetooth.createClient({ window: win });
+  const pending = client.requestAndConnect({ userInitiated: true });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(listeners.size, 1);
+  win.dispatch("pagehide");
+  resolveConnection(server);
+  await assert.rejects(pending, /interrupted/);
+  assert.equal(server.connected, false);
+  assert.equal(listeners.size, 0);
+  assert.equal(client.getStatus().state, "disconnected");
+});

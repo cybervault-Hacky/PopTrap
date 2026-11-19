@@ -7,6 +7,8 @@ completely clean and uncorrupted.
 from __future__ import annotations
 
 import logging
+import os
+import stat
 from dataclasses import dataclass
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -19,6 +21,26 @@ MAX_LOG_BYTES: int = 1_048_576  # 1 MiB
 LOG_BACKUP_COUNT: int = 3
 LOG_FORMAT: str = "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s"
 LOG_DATE_FORMAT: str = "%Y-%m-%dT%H:%M:%S"
+
+
+class _PrivateRotatingFileHandler(RotatingFileHandler):
+    def _open(self):
+        def private_open(filename: str, flags: int) -> int:
+            if Path(filename).is_symlink():
+                raise OSError("Log file must not be a symbolic link.")
+            fd = os.open(filename, flags | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0), 0o600)
+            try:
+                info = os.fstat(fd)
+                if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+                    raise OSError("Log file must be a regular file without hard links.")
+                if os.name == "posix":
+                    os.fchmod(fd, 0o600)
+            except BaseException:
+                os.close(fd)
+                raise
+            return fd
+
+        return open(self.baseFilename, self.mode, encoding=self.encoding, errors=self.errors, opener=private_open)
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,7 +85,7 @@ def configure_logging(
     target = get_log_file_path() if log_path is None else log_path.expanduser()
     try:
         ensure_private_directory(target.parent)
-        handler = RotatingFileHandler(
+        handler = _PrivateRotatingFileHandler(
             filename=target,
             maxBytes=MAX_LOG_BYTES,
             backupCount=LOG_BACKUP_COUNT,

@@ -16,8 +16,10 @@ from poptrap.engine.runtime.assets import get_web_root, resolve_web_asset
 from poptrap.engine.runtime.server import (
     DEFAULT_BIND_HOST,
     ExperienceServer,
-    create_runtime_app,
 )
+
+from poptrap.engine.runtime.security import CreatorAccess
+from tests.runtime_http import DOCUMENT, authorize, runtime_client as connect, runtime_ws
 
 
 def _cfg(
@@ -38,8 +40,9 @@ def _cfg(
 @pytest.fixture
 def runtime_client() -> tuple[PrankController, TestClient]:
     ctrl = PrankController(auto_schedule=False)
-    app = create_runtime_app(ctrl)
-    with TestClient(app) as client:
+    access = CreatorAccess()
+    with connect(ctrl, access=access) as client:
+        authorize(client, access)
         yield ctrl, client
     ctrl.shutdown()
 
@@ -236,20 +239,20 @@ class TestRuntimeRestApiValidation:
 
         # Explicit consent=True launches active payload.
         active = client.post(
-            f"/api/v1/sessions/{sid}/consent", json={"consent": True}
+            f"/api/v1/sessions/{sid}/consent", json={"consent": True}, headers=DOCUMENT
         )
         assert active.status_code == 200
         assert active.json()["session"]["state"] == "active"
         assert active.json()["runtime"]["template_id"] == template_id
 
         # Natural completion returns reveal and marks completed.
-        done = client.post(f"/api/v1/sessions/{sid}/complete")
+        done = client.post(f"/api/v1/sessions/{sid}/complete", headers=DOCUMENT)
         assert done.status_code == 200
         assert done.json()["session"]["state"] == "completed"
         assert done.json()["runtime"] is None
 
         # Duplicate complete is safely idempotent; restarting a completed session returns 409.
-        again = client.post(f"/api/v1/sessions/{sid}/complete")
+        again = client.post(f"/api/v1/sessions/{sid}/complete", headers=DOCUMENT)
         assert again.status_code == 200
         assert again.json()["session"]["state"] == "completed"
         restart = client.post(f"/api/v1/sessions/{sid}/start")
@@ -265,8 +268,8 @@ class TestRuntimeRestApiValidation:
             "/api/v1/sessions", json={"config": _cfg("glitch"), "auto_start": True}
         )
         sid1 = r1.json()["session"]["session_id"]
-        client.post(f"/api/v1/sessions/{sid1}/consent", json={"consent": True})
-        exited = client.post(f"/api/v1/sessions/{sid1}/exit")
+        client.post(f"/api/v1/sessions/{sid1}/consent", json={"consent": True}, headers=DOCUMENT)
+        exited = client.post(f"/api/v1/sessions/{sid1}/exit", headers=DOCUMENT)
         assert exited.status_code == 200
         assert exited.json()["session"]["state"] == "stopped"
 
@@ -294,7 +297,9 @@ class TestRuntimeRestApiValidation:
     def test_session_limit_returns_429(self) -> None:
         ctrl = PrankController(max_active_sessions=2, auto_schedule=False)
         try:
-            with TestClient(create_runtime_app(ctrl)) as client:
+            access = CreatorAccess()
+            with connect(ctrl, access=access) as client:
+                authorize(client, access)
                 assert (
                     client.post(
                         "/api/v1/sessions", json={"config": _cfg("glitch")}
@@ -333,7 +338,7 @@ class TestWebSocketSyncAndLocalhostServer:
                     return frame
             raise AssertionError(f"Did not receive frame type {expected_type!r}")
 
-        with client.websocket_connect(f"/ws/sessions/{snap.session_id}") as ws:
+        with runtime_ws(client, snap.session_id) as ws:
             initial = ws.receive_json()
             assert initial["type"] == "session_update"
             assert initial["session"]["state"] == "ready"
@@ -366,7 +371,7 @@ class TestWebSocketSyncAndLocalhostServer:
         _, client = runtime_client
         for bad_sid in ("invalid!", "AbCdEfGhIjKlMnOpQrStUv"):
             with pytest.raises(WebSocketDisconnect):
-                with client.websocket_connect(f"/ws/sessions/{bad_sid}") as ws:
+                with runtime_ws(client, bad_sid) as ws:
                     ws.receive_json()
 
     def test_experience_server_defaults_to_localhost_starts_and_stops_cleanly(

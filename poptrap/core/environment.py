@@ -45,13 +45,22 @@ class DependencySpec:
 
 
 REQUIRED_DEPENDENCIES: tuple[DependencySpec, ...] = (
-    DependencySpec(distribution="textual", import_name="textual", min_version=(0, 85, 0)),
-    DependencySpec(distribution="rich", import_name="rich", min_version=(13, 7, 0)),
-    DependencySpec(distribution="pydantic", import_name="pydantic", min_version=(2, 7, 0)),
+    DependencySpec(distribution="textual", import_name="textual", min_version=(8, 2, 8)),
+    DependencySpec(distribution="rich", import_name="rich", min_version=(14, 2, 0)),
+    DependencySpec(distribution="pydantic", import_name="pydantic", min_version=(2, 9, 0)),
     DependencySpec(distribution="tomli-w", import_name="tomli_w", min_version=(1, 0, 0)),
-    DependencySpec(distribution="fastapi", import_name="fastapi", min_version=(0, 115, 0)),
-    DependencySpec(distribution="uvicorn", import_name="uvicorn", min_version=(0, 30, 0)),
-    DependencySpec(distribution="websockets", import_name="websockets", min_version=(13, 0, 0)),
+    DependencySpec(distribution="fastapi", import_name="fastapi", min_version=(0, 164, 0)),
+    DependencySpec(distribution="starlette", import_name="starlette", min_version=(1, 6, 0)),
+    DependencySpec(distribution="h11", import_name="h11", min_version=(0, 16, 0)),
+    DependencySpec(distribution="uvicorn", import_name="uvicorn", min_version=(0, 54, 0)),
+    DependencySpec(distribution="websockets", import_name="websockets", min_version=(15, 0, 0)),
+    DependencySpec(distribution="ifaddr", import_name="ifaddr", min_version=(0, 2, 0)),
+    DependencySpec(distribution="anyio", import_name="anyio", min_version=(4, 14, 2)),
+    DependencySpec(distribution="idna", import_name="idna", min_version=(3, 15, 0)),
+    DependencySpec(distribution="markdown-it-py", import_name="markdown_it", min_version=(2, 2, 0)),
+    DependencySpec(distribution="opentelemetry-api", import_name="opentelemetry.trace", min_version=(1, 45, 2)),
+    DependencySpec(distribution="pygments", import_name="pygments", min_version=(2, 20, 0)),
+    DependencySpec(distribution="segno", import_name="segno", min_version=(1, 6, 0)),
 )
 
 
@@ -293,7 +302,7 @@ def enforce_environment(
         raise MissingDependencyError(
             f"Missing or incompatible runtime dependencies: {listed}.",
             missing=names,
-            hint="Run 'pip install -r requirements.txt' inside your Python environment.",
+            hint="Reinstall the documented locked runtime dependencies in your virtual environment.",
         )
 
     if require_tui and not report.terminal.supports_tui:
@@ -305,6 +314,5 @@ def enforce_environment(
         raise UnsupportedTerminalError(
             primary,
             reasons=report.terminal.blocking_issues,
-            hint="Open a standard interactive terminal (Linux terminal, macOS Terminal/iTerm2, "
-            "Windows Terminal, or Termux) and run 'python poptrap.py'.",
+            hint="Open an interactive terminal and run 'python -m poptrap' in your installed environment.",
         )

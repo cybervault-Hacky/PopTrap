@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 
 import pytest
-from fastapi.testclient import TestClient
 
 from poptrap.engine.bluetooth import (
     BluetoothConsentRequiredError,
@@ -23,7 +22,7 @@ from poptrap.engine.bluetooth import (
 )
 from poptrap.engine.controller import PrankController
 from poptrap.engine.models import PrankConfig, SessionState, TemplateId
-from poptrap.engine.runtime.server import create_runtime_app
+from tests.runtime_http import runtime_client
 
 
 class _ManualEpochClock:
@@ -304,8 +303,7 @@ class TestInvitationProtocolSecurity:
             assert acceptance.requires_session_consent is True
 
             # Session is STILL awaiting explicit recipient consent; runtime stays withheld!
-            app = create_runtime_app(controller)
-            client = TestClient(app)
+            client = runtime_client(controller)
             state_res = client.get(f"/api/v1/sessions/{acceptance.session_ref}")
             assert state_res.status_code == 200
             body = state_res.json()

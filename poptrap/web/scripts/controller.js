@@ -1,4 +1,4 @@
-/* POPTRAP Phase 3 — Session Controller, Theme Switcher & Safety Coordinator
+/* POPTRAP — Recipient Session Controller, Theme Switcher & Safety Coordinator
  * Connects the localhost FastAPI session envelope + WebSocket updates to the
  * Visual Effects Engine with complete resource disposal and safety controls.
  */
@@ -63,15 +63,17 @@
     return String(mins).padStart(2, "0") + ":" + String(secs).padStart(2, "0");
   }
 
-  function createController() {
+  function createController(transport) {
     var core = global.PopTrapEffectsCore;
     var a11y = global.PopTrapA11y;
     var transitions = global.PopTrapTransitions;
-    var particles = global.PopTrapParticles;
     var effects = global.PopTrapEffects;
 
     var uiDisposer = null;
-    var revealDisposer = null;
+    var stopWatching = null;
+    var fallbackTimer = null;
+    var pendingRequests = new Set();
+    var documentKey = null;
 
     var state = {
       sessionId: null,
@@ -83,7 +85,11 @@
       socket: null,
       timerInterval: null,
       deadlineMs: null,
+      wallDeadlineMs: null,
       muted: false,
+      starting: false,
+      launchedHere: false,
+      closedToPlayback: false,
       completing: false,
       exiting: false,
       destroyed: false,
@@ -98,7 +104,6 @@
       dom.viewReveal = doc.getElementById("view-reveal");
       dom.viewStatus = doc.getElementById("view-status");
       dom.stageRoot = doc.getElementById("stage-root");
-      dom.revealCard = doc.getElementById("reveal-card");
 
       dom.consentTitle = doc.getElementById("consent-title");
       dom.consentMeta = doc.getElementById("consent-meta");
@@ -116,6 +121,7 @@
       dom.btnTheme = doc.getElementById("btn-theme");
       dom.btnMute = doc.getElementById("btn-mute");
       dom.btnExit = doc.getElementById("btn-exit");
+      dom.tools = doc.getElementById("safety-tools");
     }
 
     function showOnly(viewName) {
@@ -134,9 +140,10 @@
         if (!node) {
           continue;
         }
+        node.hidden = name !== viewName;
         if (name === viewName) {
           node.classList.remove("is-hidden");
-          if (changed && transitions) {
+          if (changed && transitions && viewName !== "reveal" && viewName !== "status") {
             transitions.enterView(node);
           }
         } else {
@@ -169,15 +176,7 @@
       return applyTheme(next, true);
     }
 
-    function clearRevealAccent() {
-      if (revealDisposer) {
-        revealDisposer.dispose();
-        revealDisposer = null;
-      }
-    }
-
     function stopRuntimeEffects() {
-      clearRevealAccent();
       if (state.activeEffect) {
         state.activeEffect.stop();
         state.activeEffect = null;
@@ -193,7 +192,9 @@
         state.timerInterval = null;
       }
       state.deadlineMs = null;
+      state.wallDeadlineMs = null;
       if (dom.timerBadge) {
+        dom.timerBadge.hidden = true;
         dom.timerBadge.classList.add("is-hidden");
       }
     }
@@ -214,18 +215,51 @@
       }
     }
 
+    function stopMonitoring() {
+      pendingRequests.forEach(function (abort) { abort.abort(); });
+      pendingRequests.clear();
+      closeSocket();
+      if (fallbackTimer !== null && uiDisposer) {
+        uiDisposer.clearTimeout(fallbackTimer);
+        fallbackTimer = null;
+      }
+      if (stopWatching) {
+        stopWatching();
+        stopWatching = null;
+      }
+    }
+
+    function foreground() {
+      return !a11y || !a11y.isPageHidden();
+    }
+
+    function online() {
+      return !global.navigator || global.navigator.onLine !== false;
+    }
+
+    function canMonitor() {
+      return !state.destroyed && !state.closedToPlayback && foreground() && online()
+        && state.sessionId && !isTerminalSession(state.session);
+    }
+
     function updateSafetyControls(session) {
       var active = Boolean(session && !isTerminalSession(session));
       if (dom.btnExit) {
         dom.btnExit.classList.toggle("is-hidden", !active);
       }
       if (dom.btnTheme) {
-        dom.btnTheme.classList.toggle("is-hidden", !session);
+        dom.btnTheme.hidden = !active;
+        dom.btnTheme.classList.toggle("is-hidden", !active);
       }
       var showMute = Boolean(
         session && session.state === "active" && session.sound_enabled === true
       );
+      if (dom.tools) {
+        dom.tools.hidden = !active;
+        dom.tools.classList.toggle("is-hidden", !active);
+      }
       if (dom.btnMute) {
+        dom.btnMute.hidden = !showMute;
         dom.btnMute.classList.toggle("is-hidden", !showMute);
         core.setText(dom.btnMute, state.muted ? "Unmute" : "Mute");
         dom.btnMute.setAttribute("aria-pressed", state.muted ? "true" : "false");
@@ -233,38 +267,36 @@
     }
 
     function startCountdownBadge(remainingSeconds, autoTerminate) {
-      if (!uiDisposer || uiDisposer.isDisposed()) {
-        return;
-      }
-      if (state.timerInterval !== null) {
-        uiDisposer.clearInterval(state.timerInterval);
-        state.timerInterval = null;
-      }
-      var total = Math.max(1, Number(remainingSeconds) || 1);
-      state.deadlineMs = Date.now() + total * 1000;
+      if (!uiDisposer || uiDisposer.isDisposed()) return;
+      var duration = remainingSeconds * 1000;
+      var end = core.nowMs() + duration;
+      var wallEnd = Date.now() + duration;
+      // Use the earlier of monotonic and wall time across sleep. New
+      // responses can shorten but never extend either deadline.
+      state.deadlineMs = state.deadlineMs === null ? end : Math.min(state.deadlineMs, end);
+      state.wallDeadlineMs = state.wallDeadlineMs === null ? wallEnd : Math.min(state.wallDeadlineMs, wallEnd);
+      if (state.timerInterval !== null) return;
 
       function update() {
-        var left = Math.max(0, (state.deadlineMs - Date.now()) / 1000);
+        var left = Math.max(0, Math.min(state.deadlineMs - core.nowMs(), state.wallDeadlineMs - Date.now()) / 1000);
         if (dom.timerBadge) {
           core.setText(dom.timerBadge, formatTimer(left));
+          dom.timerBadge.hidden = false;
           dom.timerBadge.classList.remove("is-hidden");
         }
-        if (left <= 0 && state.timerInterval !== null) {
-          uiDisposer.clearInterval(state.timerInterval);
-          state.timerInterval = null;
-          if (autoTerminate !== false) {
-            completeSession();
-          }
+        if (left <= 0) {
+          if (autoTerminate !== false) completeSession();
+          else exitSession(false, "The simulation reached its time limit.", "expired");
         }
       }
 
+      state.timerInterval = uiDisposer.setInterval(update, 500);
       update();
-      state.timerInterval = uiDisposer.setInterval(update, 250);
     }
 
     function renderStatus(title, message) {
       stopRuntimeEffects();
-      closeSocket();
+      stopMonitoring();
       updateSafetyControls(null);
       if (dom.statusTitle) {
         core.setText(dom.statusTitle, title);
@@ -273,6 +305,7 @@
         core.setText(dom.statusMessage, message);
       }
       showOnly("status");
+      focusVisible(dom.statusTitle);
     }
 
     function renderConsent(session) {
@@ -289,34 +322,38 @@
         session.template_name +
         " · Theme: " +
         themeLabel +
-        " · Automatic end in " +
-        session.duration_seconds +
-        "s";
+        " · " + session.duration_seconds + "s visual sequence" +
+        (session.sound_enabled ? " · May play sound" : " · No sound");
       if (dom.consentMeta) {
         core.setText(dom.consentMeta, meta);
       }
       if (dom.btnStart) {
-        dom.btnStart.disabled = session.state === "created";
+        dom.btnStart.disabled = state.starting || session.state === "created" || !online();
       }
       updateSafetyControls(session);
+      var changed = state.activeView !== "consent";
       showOnly("consent");
+      if (changed) focusVisible(dom.consentTitle);
     }
 
     function renderActive(session, runtimePayload) {
       updateSafetyControls(session);
+      var changed = state.activeView !== "stage";
       showOnly("stage");
+      if (changed) focusVisible(dom.btnExit);
 
-      var remaining =
-        session.remaining_seconds !== null &&
-        session.remaining_seconds !== undefined
-          ? Math.max(1, Number(session.remaining_seconds))
-          : Number(session.duration_seconds) || 16;
-
+      var remaining = typeof session.remaining_seconds === "number"
+        ? core.clamp(session.remaining_seconds, 0, 180)
+        : core.clamp(Number(session.duration_seconds) || 16, 0, 180);
+      if (remaining <= 0) {
+        exitSession(false, "The simulation reached its time limit.", "expired");
+        return;
+      }
       startCountdownBadge(remaining, session.auto_terminate);
 
-      if (!state.activeEffect && dom.stageRoot && effects) {
+      if (state.deadlineMs !== null && !state.activeEffect && dom.stageRoot && effects) {
         var effectConfig = Object.assign({}, session, {
-          duration_seconds: remaining,
+          duration_seconds: Math.min(remaining, Number(session.duration_seconds) || remaining),
           theme: state.theme,
           runtime: runtimePayload || {},
         });
@@ -347,13 +384,12 @@
 
     function renderReveal(session) {
       stopRuntimeEffects();
-      closeSocket();
+      stopMonitoring();
       updateSafetyControls(session);
 
       var heading = "That was a POPTRAP simulation.";
       var summary =
         "Completed cleanly — you may safely close this browser tab at any time.";
-      var celebrate = false;
 
       if (session.state === "stopped" || session.state === "cancelled") {
         heading = "Simulation exited.";
@@ -369,8 +405,6 @@
         heading = "Simulation ended safely.";
         summary =
           "Automatic recovery stopped the simulation cleanly. You may close this tab.";
-      } else {
-        celebrate = true;
       }
 
       if (dom.revealTitle) {
@@ -379,8 +413,8 @@
       if (dom.revealMessage) {
         core.setText(
           dom.revealMessage,
-          session.reveal_message ||
-            "Relax — this was a harmless POPTRAP simulation."
+          session.consent_granted !== true ? "No simulation was launched from this consent screen." :
+            session.reveal_message || "This was a harmless POPTRAP simulation."
         );
       }
       if (dom.revealSummary) {
@@ -388,48 +422,46 @@
       }
       showOnly("reveal");
 
-      if (
-        celebrate &&
-        dom.revealCard &&
-        particles &&
-        core &&
-        (!a11y || (!a11y.isReducedMotion() && !a11y.isPageHidden()))
-      ) {
-        revealDisposer = core.createDisposer();
-        particles.burst(dom.revealCard, revealDisposer, {
-          count: 8,
-          spreadPx: 64,
-          durationMs: 600,
-        });
-      }
-
       if (a11y) {
         a11y.announce(heading + " " + (session.reveal_message || ""));
       }
 
-      if (dom.revealTitle && typeof dom.revealTitle.focus === "function") {
-        try {
-          dom.revealTitle.focus({ preventScroll: true });
-        } catch (_err) {
-          dom.revealTitle.focus();
-        }
-      }
+      focusVisible(dom.revealTitle);
+    }
+
+    function focusVisible(node) {
+      if (foreground() && node && typeof node.focus === "function") node.focus();
     }
 
     function applyEnvelope(envelope) {
-      if (state.destroyed) {
-        return null;
-      }
+      if (state.destroyed || state.closedToPlayback || isTerminalSession(state.session)) return null;
       var unpacked = unwrapEnvelope(envelope);
       var session = unpacked.session;
       if (!session) {
         return null;
       }
+      if (!isTerminalSession(session) && state.exiting) return null;
+      if (session.state === "active") {
+        if (!state.launchedHere || session.consent_granted !== true) {
+          // Another view (or an old /s URL) cannot inherit a running session.
+          // The HTTP response to this tab's Launch is the only authorization.
+          if (state.starting) return null;
+          state.closedToPlayback = true;
+          renderStatus("Session already started", "This tab did not launch that run. Ask the creator for a fresh session.");
+          return null;
+        }
+        if (!foreground() || !online()) {
+          exitSession(true, "Playback stopped when this tab was interrupted. It will not resume.");
+          return null;
+        }
+      } else if (state.launchedHere && !isTerminalSession(session)) {
+        // Ignore stale READY messages after confirming the launch.
+        return null;
+      }
       var hadSession = Boolean(state.session);
       state.session = session;
-      if (unpacked.runtime) {
-        state.runtime = unpacked.runtime;
-      }
+      if (isTerminalSession(session)) state.runtime = null;
+      else if (unpacked.runtime) state.runtime = unpacked.runtime;
       /* Adopt server theme on initial load; preserve live user switch afterwards */
       if (!hadSession && session.theme) {
         applyTheme(session.theme, false);
@@ -454,12 +486,23 @@
       return session;
     }
 
-    function apiRequest(path, method, payload) {
+    function apiRequest(path, method, payload, keepalive, abort) {
       var opts = {
         method: method,
-        credentials: "same-origin",
+        mode: "same-origin",
+        credentials: "omit",
+        referrerPolicy: "same-origin", // Preserve same-origin POST Origin even on local HTTP.
+        redirect: "error",
+        cache: "no-store",
+        keepalive: keepalive === true,
         headers: { Accept: "application/json" },
       };
+      if (documentKey) opts.headers["X-Poptrap-Document"] = documentKey;
+      if (abort) opts.signal = abort.signal;
+      var timedOut = false;
+      var timer = abort ? global.setTimeout(function () { timedOut = true; abort.abort(); }, 3000) : null;
+      var clearDeadline = function () { if (timer !== null) global.clearTimeout(timer); };
+      if (abort) abort.signal.addEventListener("abort", clearDeadline, { once: true });
       if (payload !== undefined) {
         opts.headers["Content-Type"] = "application/json";
         opts.body = JSON.stringify(payload);
@@ -482,11 +525,55 @@
             }
             return data;
           });
+      }).catch(function (error) {
+        if (timedOut) throw new Error("The local runtime did not respond in time.");
+        throw error;
+      }).finally(function () {
+        clearDeadline();
+        if (abort) abort.signal.removeEventListener("abort", clearDeadline);
       });
     }
 
+    function sessionRequest(action, payload, keepalive) {
+      var abort = !keepalive && typeof global.AbortController === "function" ? new global.AbortController() : null;
+      if (abort) pendingRequests.add(abort);
+      var path = "/api/v1/sessions/" + encodeURIComponent(state.sessionId);
+      var call = transport
+        ? transport.request(action, payload, keepalive, abort && abort.signal)
+        : action === "view"
+          ? apiRequest(path, "GET", undefined, false, abort)
+          : apiRequest(path + "/" + action, "POST", payload, keepalive, abort);
+      return call.then(function (envelope) {
+        if (abort && abort.signal.aborted) throw new global.DOMException("Request cancelled.", "AbortError");
+        return envelope;
+      }).finally(function () { if (abort) pendingRequests.delete(abort); });
+    }
+
+    function connectionLost(error) {
+      if (state.destroyed || state.closedToPlayback || isTerminalSession(state.session)) return;
+      var reason = error && (error.status === 404 || error.status === 410)
+        ? "The session expired or was revoked. Ask the creator for a new link."
+        : "The local connection was lost. Playback will not resume. Ask the creator for a fresh session.";
+      if (state.launchedHere || state.starting) {
+        exitSession(true, reason);
+      } else {
+        state.closedToPlayback = true;
+        renderStatus("Session unavailable", reason);
+      }
+    }
+
+    function scheduleLocalFallback() {
+      if (fallbackTimer !== null || !canMonitor() || (state.socket && state.socket.readyState === 1)) return;
+      fallbackTimer = uiDisposer.setTimeout(function () {
+        fallbackTimer = null;
+        if (canMonitor() && (!state.socket || state.socket.readyState !== 1)) {
+          refreshSession().then(scheduleLocalFallback);
+        }
+      }, 1600);
+    }
+
     function connectWebSocket(sessionId) {
-      if (state.destroyed || !global.WebSocket || state.socket) {
+      if (state.destroyed || !global.WebSocket || !documentKey || state.socket) {
         return;
       }
       var proto =
@@ -497,10 +584,12 @@
       var url =
         proto + "//" + host + "/ws/sessions/" + encodeURIComponent(sessionId);
       try {
-        var ws = new global.WebSocket(url);
+        var ws = new global.WebSocket(url, ["poptrap.v1", documentKey]);
+        var connected = ws.readyState === 1;
         state.socket = ws;
+        ws.onopen = function () { connected = true; };
         ws.onmessage = function (ev) {
-          if (state.destroyed) {
+          if (state.socket !== ws || !canMonitor()) {
             return;
           }
           try {
@@ -512,13 +601,11 @@
             /* Ignore malformed frame */
           }
         };
-        ws.onclose = function () {
-          if (state.socket === ws) {
-            state.socket = null;
-          }
-        };
-        ws.onerror = function () {
-          /* HTTP fallback remains active */
+        ws.onclose = ws.onerror = function () {
+          if (state.socket !== ws) return;
+          closeSocket();
+          if (connected && (state.launchedHere || state.starting)) connectionLost();
+          else scheduleLocalFallback();
         };
       } catch (_err) {
         state.socket = null;
@@ -526,109 +613,107 @@
     }
 
     function refreshSession() {
-      if (!state.sessionId || state.destroyed) {
-        return Promise.resolve(null);
-      }
-      return apiRequest(
-        "/api/v1/sessions/" + encodeURIComponent(state.sessionId),
-        "GET"
-      )
+      if (!canMonitor()) return Promise.resolve(null);
+      return sessionRequest("view")
         .then(function (envelope) {
-          return applyEnvelope(envelope);
-        })
-        .catch(function () {
+          if (canMonitor()) return applyEnvelope(envelope);
           return null;
+        })
+        .catch(function (error) {
+          if (canMonitor() && error.name !== "AbortError") connectionLost(error);
         });
+    }
+
+    function monitorSession() {
+      if (!canMonitor()) return;
+      if (transport) {
+        if (!stopWatching) stopWatching = transport.watch(applyEnvelope, connectionLost);
+      } else {
+        connectWebSocket(state.sessionId);
+        scheduleLocalFallback();
+      }
     }
 
     function startSession() {
-      if (!state.sessionId || state.exiting || state.destroyed) {
+      if (!canMonitor() || (!transport && !documentKey) || !state.session || state.starting || state.exiting || state.launchedHere || state.session.state === "created") {
         return Promise.resolve(null);
       }
-      if (dom.btnStart) {
-        dom.btnStart.disabled = true;
-      }
-      return apiRequest(
-        "/api/v1/sessions/" + encodeURIComponent(state.sessionId) + "/consent",
-        "POST",
-        { consent: true }
-      )
+      state.starting = true;
+      if (dom.btnStart) dom.btnStart.disabled = true;
+      return sessionRequest("consent", { consent: true })
         .then(function (envelope) {
-          return applyEnvelope(envelope);
+          if (state.destroyed || isTerminalSession(state.session) || state.closedToPlayback) return null;
+          var ack = unwrapEnvelope(envelope).session;
+          if (ack && isTerminalSession(ack)) return applyEnvelope(envelope);
+          if (!ack || ack.state !== "active" || ack.consent_granted !== true) {
+            connectionLost();
+            return null;
+          }
+          state.launchedHere = true;
+          var session = applyEnvelope(envelope);
+          monitorSession();
+          return session;
         })
-        .catch(function () {
-          renderStatus(
-            "Unable to start simulation",
-            "This session may have ended or timed out. Launch a fresh one from POPTRAP."
-          );
-          return null;
-        });
-    }
-
-    function completeSession() {
-      if (
-        !state.sessionId ||
-        state.completing ||
-        state.exiting ||
-        state.destroyed
-      ) {
-        return Promise.resolve(null);
-      }
-      if (isTerminalSession(state.session)) {
-        return Promise.resolve(state.session);
-      }
-      state.completing = true;
-      return apiRequest(
-        "/api/v1/sessions/" + encodeURIComponent(state.sessionId) + "/complete",
-        "POST"
-      )
-        .then(function (envelope) {
-          return applyEnvelope(envelope);
-        })
-        .catch(function () {
-          if (state.session) {
-            renderReveal(
-              Object.assign({}, state.session, {
-                state: "completed",
-                is_terminal: true,
-              })
-            );
+        .catch(function (error) {
+          // A conflict is not ours to stop (another tab may have launched first).
+          if (error.status === 409 && !state.launchedHere && !isTerminalSession(state.session)) {
+            state.closedToPlayback = true;
+            renderStatus("Session already started or ended", "Ask the creator for a fresh session.");
+          } else {
+            connectionLost(error);
           }
           return null;
         })
-        .finally(function () {
-          state.completing = false;
-        });
+        .finally(function () { state.starting = false; });
     }
 
-    function exitSession() {
-      if (state.exiting || state.destroyed) {
+    function completeSession() {
+      if (!state.launchedHere || state.completing || state.exiting || state.destroyed || isTerminalSession(state.session)) {
         return Promise.resolve(null);
       }
-      if (!state.sessionId || isTerminalSession(state.session)) {
+      state.completing = true;
+      var ended = Object.assign({}, state.session, { state: "completed", is_terminal: true });
+      applyEnvelope({ session: ended });
+      return sessionRequest("complete", undefined, true)
+        .then(function (envelope) { return unwrapEnvelope(envelope).session; })
+        .catch(function () { return null; });
+    }
+
+    function exitSession(keepalive, reason, endedState) {
+      if (state.exiting || state.destroyed || state.closedToPlayback || !state.sessionId || isTerminalSession(state.session)) {
         return Promise.resolve(null);
       }
       state.exiting = true;
-      stopRuntimeEffects();
-
       var localStop = Object.assign({}, state.session || {}, {
-        state: "stopped",
+        state: endedState || "stopped",
         is_terminal: true,
-        termination_reason: "Exited by recipient.",
+        termination_reason: reason || "Exited by recipient.",
       });
-      return apiRequest(
-        "/api/v1/sessions/" + encodeURIComponent(state.sessionId) + "/exit",
-        "POST"
-      )
-        .then(function (envelope) {
-          return applyEnvelope(envelope);
-        })
-        .catch(function () {
-          return applyEnvelope({ session: localStop, runtime: null });
-        })
-        .finally(function () {
-          state.exiting = false;
-        });
+      applyEnvelope({ session: localStop });
+      return sessionRequest("exit", undefined, keepalive !== false)
+        .then(function (envelope) { return unwrapEnvelope(envelope).session; })
+        .catch(function () { return null; });
+    }
+
+    function backgrounded() {
+      if (state.launchedHere || state.starting) {
+        exitSession(true, "The tab left the foreground. The simulation ended and will not resume.");
+      } else {
+        stopMonitoring();
+      }
+    }
+
+    function leavePage() {
+      if (transport || state.launchedHere || state.starting) {
+        exitSession(true, "The page was closed. The simulation ended and will not resume.");
+      }
+      if (!isTerminalSession(state.session)) {
+        renderStatus("Session page closed", "Reload for a fresh consent screen, or open a new invitation.");
+      }
+      // A back/forward-cache restore retains only this inert view, not a player.
+      destroy();
+      documentKey = null;
+      if (transport && transport.dispose) transport.dispose();
     }
 
     function toggleMute() {
@@ -681,26 +766,26 @@
         });
       }
       disp.listen(global.document, "keydown", function (ev) {
-        if (ev.key === "Escape") {
+        if (ev.key === "Escape" && !ev.isComposing && state.sessionId
+            && !state.closedToPlayback && !isTerminalSession(state.session)) {
           ev.preventDefault();
           exitSession();
         }
       });
+      disp.listen(global, "offline", function () { connectionLost(); });
+      disp.listen(global.document, "freeze", backgrounded);
       if (a11y) {
-        disp.add(
-          a11y.visibility.onChange(function (hidden) {
-            if (!hidden && state.session && !isTerminalSession(state.session)) {
-              refreshSession();
-            }
-          })
-        );
+        disp.add(a11y.visibility.onChange(function (hidden) {
+          if (hidden) backgrounded();
+          else if (canMonitor()) refreshSession().then(monitorSession);
+        }));
       }
     }
 
     function destroy() {
       state.destroyed = true;
       stopRuntimeEffects();
-      closeSocket();
+      stopMonitoring();
       if (uiDisposer) {
         uiDisposer.dispose();
         uiDisposer = null;
@@ -715,8 +800,12 @@
         destroy();
       }
       state.destroyed = false;
+      state.sessionId = null;
       state.session = null;
       state.runtime = null;
+      state.starting = false;
+      state.launchedHere = false;
+      state.closedToPlayback = false;
       state.completing = false;
       state.exiting = false;
       uiDisposer = core.createDisposer();
@@ -726,7 +815,7 @@
       bindControls();
 
       var pathname = global.location ? global.location.pathname : "/";
-      var sessionId = parseSessionIdFromPath(pathname);
+      var sessionId = transport ? "delivery" : parseSessionIdFromPath(pathname);
       if (!sessionId) {
         renderStatus(
           "POPTRAP Local Runtime",
@@ -736,22 +825,30 @@
       }
 
       state.sessionId = sessionId;
-      return apiRequest(
-        "/api/v1/sessions/" + encodeURIComponent(sessionId),
-        "GET"
-      )
+      if (!transport) {
+        documentKey = global.PopTrapDocumentKey?.();
+        if (!documentKey) {
+          renderStatus("Session unavailable", "This browser does not support secure document keys.");
+          return Promise.resolve(null);
+        }
+      }
+      if (!foreground()) return Promise.resolve(null);
+      if (!online()) {
+        connectionLost();
+        return Promise.resolve(null);
+      }
+      return sessionRequest("view")
         .then(function (envelope) {
-          if (state.destroyed) {
-            return null;
-          }
+          if (!canMonitor()) return null;
           var session = applyEnvelope(envelope);
-          if (session && !isTerminalSession(session)) {
-            connectWebSocket(sessionId);
-          }
+          monitorSession();
           return session;
         })
         .catch(function (err) {
-          if (state.destroyed) {
+          if (!canMonitor() || err.name === "AbortError") return null;
+          if (transport) {
+            state.closedToPlayback = true;
+            renderStatus("Delivery session unavailable", "Open and accept a current POPTRAP invitation first.");
             return null;
           }
           var title =
@@ -769,6 +866,7 @@
     return {
       init: init,
       destroy: destroy,
+      leavePage: leavePage,
       startSession: startSession,
       completeSession: completeSession,
       exitSession: exitSession,

@@ -1,0 +1,8 @@
+include poptrap.py
+include LICENSE README.md CHANGELOG.md THIRD_PARTY_NOTICES.md SECURITY.md CONTRIBUTING.md CODE_OF_CONDUCT.md
+include requirements.txt
+include requirements/runtime.lock requirements/test.lock requirements/build.lock
+recursive-include docs *.md *.png
+recursive-include tests *.py *.mjs
+recursive-include tools *.py
+global-exclude *.py[cod] *.log *.tmp *.bak .DS_Store

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import hmac
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -47,6 +48,7 @@ class SessionRecord:
     runtime_override: dict[str, Any] | None = None
     is_preview: bool = False
     studio_config: dict[str, Any] | None = None
+    playback_owner: bytes | None = None
 
     def to_snapshot(self, *, remaining_seconds: float | None) -> SessionSnapshot:
         """Build an immutable ``SessionSnapshot`` for API and UI consumers."""
@@ -79,11 +81,15 @@ class SessionStore:
         self,
         *,
         max_active_sessions: int = MAX_ACTIVE_SESSIONS,
+        max_retained_sessions: int = 256,
         wall_clock: Callable[[], datetime] = _utc_now,
     ) -> None:
         if max_active_sessions < 1:
             raise ValueError("max_active_sessions must be at least 1.")
+        if max_retained_sessions < 1:
+            raise ValueError("max_retained_sessions must be at least 1.")
         self._max_active = int(max_active_sessions)
+        self._capacity = self._max_active + int(max_retained_sessions)
         self._wall_clock = wall_clock
         self._lock = threading.RLock()
         self._records: dict[str, SessionRecord] = {}
@@ -121,6 +127,12 @@ class SessionStore:
                 raise SessionLimitError(
                     f"Maximum active session limit ({self._max_active}) reached.",
                     hint="Stop or cancel an existing session before creating a new one.",
+                )
+
+            if len(self._records) >= self._capacity:
+                raise SessionLimitError(
+                    "Session history is at capacity.",
+                    hint="Wait for ended records to reach their cleanup deadline.",
                 )
 
             session_id = generate_session_id()
@@ -185,6 +197,7 @@ class SessionStore:
         ttl_seconds: float | None = None,
         reason: str | None = None,
         grant_consent: bool = False,
+        playback_owner: bytes | None = None,
     ) -> SessionSnapshot:
         """Atomically move ``session_id`` to ``target`` and return its snapshot."""
         with self._lock:
@@ -196,6 +209,7 @@ class SessionStore:
 
             if grant_consent:
                 record.consent_granted = True
+                record.playback_owner = playback_owner
 
             if target is SessionState.READY:
                 record.started_at = now
@@ -211,6 +225,15 @@ class SessionStore:
                 ttl_seconds = None
 
             return record.to_snapshot(remaining_seconds=ttl_seconds)
+
+    def is_preview(self, session_id: str) -> bool:
+        with self._lock:
+            return self._get_locked(session_id).is_preview
+
+    def owns_playback(self, session_id: str, proof: bytes | None) -> bool:
+        with self._lock:
+            owner = self._get_locked(session_id).playback_owner
+            return owner is not None and proof is not None and hmac.compare_digest(owner, proof)
 
     def snapshot(
         self,

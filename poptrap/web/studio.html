@@ -20,7 +20,8 @@
       <span class="sim-pill">PRANK STUDIO</span>
       <span class="studio-scope-tag">LOCALHOST ONLY</span>
     </div>
-    <div class="safety-controls">
+    <div id="studio-actions" hidden class="safety-controls is-hidden">
+      <button id="btn-studio-lock" type="button" class="bar-btn bar-btn-subtle">Lock Studio</button>
       <button id="btn-header-preview" type="button" class="bar-btn bar-btn-subtle">Live Preview</button>
       <button id="btn-header-save" type="button" class="bar-btn bar-btn-subtle">Save Preset</button>
       <button id="btn-header-launch" type="button" class="bar-btn bar-btn-exit">Start Local Session</button>
@@ -35,7 +36,10 @@
       <div id="studio-banner-actions" class="studio-banner-actions"></div>
     </div>
 
-    <div class="studio-grid">
+    <p id="studio-access" role="status" class="studio-section">
+      Browser Studio is locked. Request a fresh one-time link in the terminal's Prank Studio or Control Center.
+    </p>
+    <div id="studio-workspace" hidden class="studio-grid is-hidden">
       <!-- Left column: Builder configuration & stage composer -->
       <div class="studio-editor-col">
         <!-- 1. Template selection -->

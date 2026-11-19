@@ -10,6 +10,12 @@
   var a11y = global.PopTrapA11y;
   var effects = global.PopTrapEffects;
 
+  var TOKEN = /^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/;
+  var TICKET = /^#ticket=([A-Za-z0-9_-]{42}[AEIMQUYcgkosw048])(?:&(template|preset)=([a-z0-9][a-z0-9_-]{0,47}))?$/;
+  var UNLOCK = "/api/v1/studio/unlock";
+  var LOCK = "/api/v1/studio/lock";
+  var LOCKED = "Browser Studio is locked. Request a fresh one-time link from POPTRAP.";
+
   function deepClone(obj) {
     return JSON.parse(JSON.stringify(obj));
   }
@@ -32,7 +38,8 @@
       presets: [],
       presetWarnings: [],
       previewSessionId: null,
-      previewPath: null,
+      previewRequest: 0,
+      previewPending: false,
       previewHandle: null,
       previewTimer: null,
       previewDeadlineMs: null,
@@ -40,8 +47,15 @@
     };
 
     var dom = {};
+    var bearer = null;
+    var unlockVersion = 0;
+    var watch = null;
 
     function cacheDom() {
+      dom.access = doc.getElementById("studio-access");
+      dom.workspace = doc.getElementById("studio-workspace");
+      dom.headerActions = doc.getElementById("studio-actions");
+      dom.lock = doc.getElementById("btn-studio-lock");
       dom.banner = doc.getElementById("studio-banner");
       dom.bannerText = doc.getElementById("studio-banner-text");
       dom.bannerActions = doc.getElementById("studio-banner-actions");
@@ -100,39 +114,79 @@
       dom.presetList = doc.getElementById("preset-list");
     }
 
-    function api(path, method, payload) {
-      var opts = {
-        method: method,
-        credentials: "same-origin",
-        headers: { Accept: "application/json" },
-      };
-      if (payload !== undefined) {
-        opts.headers["Content-Type"] = "application/json";
-        opts.body = JSON.stringify(payload);
+    async function api(path, method, payload, keepalive, signal) {
+      var authorization = bearer;
+      if (path !== UNLOCK && !authorization) throw new Error(LOCKED);
+      var headers = { Accept: "application/json" };
+      if (path !== UNLOCK) headers.Authorization = "Bearer " + authorization;
+      if (payload !== undefined) headers["Content-Type"] = "application/json";
+      var abort = new global.AbortController();
+      var cancel = function () { abort.abort(); };
+      if (signal?.aborted) cancel();
+      else signal?.addEventListener("abort", cancel, { once: true });
+      var timer = global.setTimeout(cancel, 3000);
+      try {
+        var resp = await global.fetch(path, {
+          method: method, mode: "same-origin", credentials: "omit", cache: "no-store",
+          redirect: "error", referrerPolicy: "same-origin", headers: headers, signal: abort.signal,
+          keepalive: keepalive === true,
+          body: payload === undefined ? undefined : JSON.stringify(payload),
+        });
+        var data = await resp.json().catch(function () { return {}; });
+        if (path !== UNLOCK && bearer !== authorization) throw new Error(LOCKED);
+        if (!resp.ok) {
+          var errObj = (data && data.error) || {};
+          var err = new Error(errObj.message || "Request failed.");
+          err.status = resp.status;
+          err.code = errObj.code || "error";
+          err.fields = Array.isArray(errObj.fields) ? errObj.fields : [];
+          err.existingId = errObj.existing_id || null;
+          if (resp.status === 401 && path !== UNLOCK) clearEditor(LOCKED);
+          throw err;
+        }
+        return data;
+      } finally {
+        global.clearTimeout(timer);
+        signal?.removeEventListener("abort", cancel);
       }
-      return global.fetch(path, opts).then(function (resp) {
-        return resp
-          .json()
-          .catch(function () {
-            return {};
-          })
-          .then(function (data) {
-            if (!resp.ok) {
-              var errObj = (data && data.error) || {};
-              var err = new Error(errObj.message || "Request failed.");
-              err.status = resp.status;
-              err.code = errObj.code || "error";
-              err.fields = Array.isArray(errObj.fields) ? errObj.fields : [];
-              err.existingId = errObj.existing_id || null;
-              throw err;
-            }
-            return data;
-          });
+    }
+
+    function clearEditor(message) {
+      unlockVersion++;
+      bearer = null;
+      state.previewRequest++;
+      state.previewPending = false;
+      stopLocalEffectOnly();
+      state.previewSessionId = null;
+      state.catalog = state.config = state.loadedPresetId = state.loadedPresetName = null;
+      state.templatesById = Object.create(null);
+      state.presets = [];
+      state.presetWarnings = [];
+      [dom.fieldName, dom.fieldTitle, dom.fieldMessage, dom.fieldReveal, dom.fieldDuration].forEach(function (node) {
+        node.value = "";
       });
+      [dom.templateGrid, dom.specificFields, dom.stageList, dom.presetList, dom.presetPrompt,
+        dom.presetDetails, dom.presetWarnings, dom.previewSummaryTitle, dom.previewSummaryMeta,
+        dom.previewRevealTitle, dom.previewRevealBody, dom.previewLinkLine, dom.loadedIndicator,
+        dom.bannerText, dom.bannerActions, dom.specificChip, dom.stageBudgetChip].forEach(core.clearChildren);
+      dom.banner.classList.add("is-hidden");
+      dom.workspace.hidden = dom.headerActions.hidden = true;
+      dom.workspace.classList.add("is-hidden");
+      dom.headerActions.classList.add("is-hidden");
+      dom.access.classList.remove("is-hidden");
+      core.setText(dom.access, message);
+    }
+
+    function lockEditor() {
+      if (bearer) {
+        retirePreview(state.previewSessionId);
+        api(LOCK, "POST", {}, true).catch(function () {});
+      }
+      clearEditor(LOCKED);
     }
 
     function showBanner(text, level, linkHref, linkLabel) {
-      if (!dom.banner) {
+      if (!dom.banner || !bearer) {
         return;
       }
       dom.banner.classList.remove("is-hidden", "is-error", "is-warn");
@@ -144,7 +198,7 @@
       core.setText(dom.bannerText, text);
       core.clearChildren(dom.bannerActions);
 
-      if (typeof linkHref === "string" && linkHref.indexOf("/s/") === 0) {
+      if (typeof linkHref === "string" && /^\/s\/[A-Za-z0-9_-]{20,32}$/.test(linkHref)) {
         var anchor = core.el("a", "studio-link", linkLabel || linkHref);
         anchor.setAttribute("href", linkHref);
         dom.bannerActions.appendChild(anchor);
@@ -718,6 +772,11 @@
     }
 
     function stopLocalEffectOnly() {
+      if (watch) {
+        global.clearTimeout(watch.timer);
+        watch.abort.abort();
+        watch = null;
+      }
       clearPreviewTimer();
       if (state.previewHandle) {
         state.previewHandle.stop();
@@ -771,12 +830,30 @@
       }
     }
 
+    function monitorPreview(sid) {
+      var current = { abort: new global.AbortController(), timer: null };
+      watch = current;
+      var check = async function () {
+        try {
+          var data = await api("/api/v1/studio/preview/" + encodeURIComponent(sid), "GET", undefined, false, current.abort.signal);
+          if (watch !== current) return;
+          if (data.state !== "active") {
+            stopPreview("This preview ended on the host. Start a new preview to run again.");
+            return;
+          }
+          current.timer = global.setTimeout(check, 1500);
+        } catch (_error) {
+          if (watch === current) stopPreview("Preview ended when the local connection was interrupted.");
+        }
+      };
+      current.timer = global.setTimeout(check, 1500);
+    }
+
     function mountPreviewEnvelope(envelope) {
       stopLocalEffectOnly();
       var session = envelope.session;
       var runtime = envelope.runtime || {};
       state.previewSessionId = session.session_id;
-      state.previewPath = envelope.preview_path || "/s/" + session.session_id;
 
       dom.previewViewport.setAttribute("data-theme", session.theme || "dark");
       core.setText(dom.previewStateLabel, "LOCAL PREVIEW · RUNNING");
@@ -784,13 +861,18 @@
 
       core.clearChildren(dom.previewLinkLine);
       dom.previewLinkLine.appendChild(
-        doc.createTextNode("Running real POPTRAP engine locally · Standalone URL: ")
+        doc.createTextNode("Running locally in this editor. ")
       );
-      var link = core.el("a", "studio-link", state.previewPath);
-      link.setAttribute("href", state.previewPath);
-      dom.previewLinkLine.appendChild(link);
+      var standalone = core.el("button", "btn btn-secondary", "Prepare standalone run");
+      standalone.type = "button";
+      standalone.addEventListener("click", startLocalSession);
+      dom.previewLinkLine.appendChild(standalone);
 
-      var dur = Math.max(1, Number(session.duration_seconds) || 10);
+      var dur = Math.min(Number(session.duration_seconds) || 0, session.remaining_seconds ?? Infinity);
+      if (session.state !== "active" || !envelope.runtime || dur <= 0) {
+        stopPreview("Preview is no longer active.");
+        return;
+      }
       state.previewDeadlineMs = Date.now() + dur * 1000;
       dom.previewTimer.classList.remove("is-hidden");
       core.setText(dom.previewTimer, formatTimer(dur));
@@ -830,13 +912,14 @@
           },
         }
       );
+      if (state.previewHandle) monitorPreview(session.session_id);
     }
 
     function finishPreview(session) {
       stopLocalEffectOnly();
       var sid = state.previewSessionId;
       if (sid) {
-        api("/api/v1/sessions/" + encodeURIComponent(sid) + "/complete", "POST").catch(
+        api("/api/v1/studio/preview/" + encodeURIComponent(sid) + "/complete", "POST").catch(
           function () {}
         );
       }
@@ -848,46 +931,44 @@
       showPreviewMode("reveal");
     }
 
-    function startPreview() {
-      return api("/api/v1/studio/preview", "POST", {
-        config: state.config,
-        consent: true,
-      })
+    function retirePreview(sid) {
+      if (sid) api("/api/v1/studio/preview/" + encodeURIComponent(sid) + "/stop", "POST", undefined, true)
+        .catch(function () {});
+    }
+
+    function requestPreview(sid) {
+      if (a11y.isPageHidden() || global.navigator?.onLine === false || state.previewPending) return Promise.resolve();
+      var version = ++state.previewRequest;
+      state.previewPending = true;
+      var path = "/api/v1/studio/preview" + (sid ? "/" + encodeURIComponent(sid) + "/restart" : "");
+      return api(path, "POST", { config: state.config, consent: true })
         .then(function (envelope) {
+          if (version !== state.previewRequest || a11y.isPageHidden()) {
+            retirePreview(envelope.session.session_id);
+            return;
+          }
           mountPreviewEnvelope(envelope);
         })
         .catch(function (err) {
+          if (version !== state.previewRequest) return;
+          if (sid) {
+            state.previewPending = false;
+            return requestPreview(null);
+          }
           showBanner(err.message, "error");
-        });
+        })
+        .finally(function () { if (version === state.previewRequest) state.previewPending = false; });
     }
 
-    function restartPreview() {
-      if (!state.previewSessionId) {
-        return startPreview();
-      }
-      var sid = state.previewSessionId;
-      return api(
-        "/api/v1/studio/preview/" + encodeURIComponent(sid) + "/restart",
-        "POST",
-        { config: state.config, consent: true }
-      )
-        .then(function (envelope) {
-          mountPreviewEnvelope(envelope);
-        })
-        .catch(function () {
-          return startPreview();
-        });
-    }
+    function startPreview() { return requestPreview(null); }
+
+    function restartPreview() { return requestPreview(state.previewSessionId); }
 
     function stopPreview(customNotice) {
+      state.previewRequest++;
+      state.previewPending = false;
       stopLocalEffectOnly();
-      var sid = state.previewSessionId;
-      if (sid) {
-        api(
-          "/api/v1/studio/preview/" + encodeURIComponent(sid) + "/stop",
-          "POST"
-        ).catch(function () {});
-      }
+      retirePreview(state.previewSessionId);
       core.setText(
         dom.previewRevealTitle,
         customNotice || "Preview stopped — back in editor."
@@ -905,7 +986,7 @@
     }
 
     function startLocalSession() {
-      stopLocalEffectOnly();
+      if (state.previewHandle || state.previewPending) stopPreview();
       return api("/api/v1/studio/sessions", "POST", {
         config: state.config,
         auto_start: true,
@@ -1109,7 +1190,7 @@
         "GET"
       )
         .then(function (data) {
-          stopLocalEffectOnly();
+          if (state.previewHandle || state.previewPending) stopPreview("Preview ended when the preset was loaded.");
           state.config = deepClone(data.preset.config);
           state.loadedPresetId = data.preset.preset_id;
           state.loadedPresetName = data.preset.name;
@@ -1458,36 +1539,68 @@
         savePresetRequest(null, false);
       });
       dom.btnHeaderLaunch.addEventListener("click", startLocalSession);
+      dom.lock.addEventListener("click", lockEditor);
 
       doc.addEventListener("keydown", function (ev) {
-        if (ev.key === "Escape" && state.previewHandle) {
+        if (ev.key === "Escape" && !ev.isComposing && (state.previewHandle || state.previewPending)) {
           ev.preventDefault();
           stopPreview("Preview exited with Escape.");
         }
       });
+      function interruptPreview() {
+        if (state.previewHandle || state.previewPending) stopPreview("Preview ended when the tab was interrupted. Choose Start Preview to run again.");
+      }
+      doc.addEventListener("visibilitychange", function () { if (a11y.isPageHidden()) interruptPreview(); });
+      doc.addEventListener("freeze", interruptPreview);
+      global.addEventListener("pagehide", lockEditor);
+      global.addEventListener("hashchange", unlock);
+      global.addEventListener("offline", interruptPreview);
+    }
+
+    async function unlock() {
+      var fragment = global.location.hash;
+      if (!fragment) return;
+      var incoming = TICKET.exec(fragment);
+      try { global.history.replaceState(null, "", global.location.pathname); }
+      catch (_error) {
+        clearEditor("Could not remove the access link. Close this tab and request a fresh link.");
+        return;
+      }
+      if (!incoming) { clearEditor(LOCKED); return; }
+      // An access link authorizes editing and optionally selects a record. It never launches.
+      clearEditor("Verifying one-time Browser Studio access…");
+      var version = unlockVersion;
+      try {
+        var data = await api(UNLOCK, "POST", { token: incoming[1] });
+        if (version !== unlockVersion || !TOKEN.test(data.bearer)) return;
+        bearer = data.bearer;
+        var catalog = await api("/api/v1/studio/catalog", "GET");
+        if (version !== unlockVersion) return;
+        state.catalog = catalog;
+        var list = catalog.templates || [];
+        for (var i = 0; i < list.length; i += 1) {
+          state.templatesById[list[i].template_id] = list[i];
+        }
+        populateThemeSelect();
+        var selected = incoming[2] === "template" && state.templatesById[incoming[3]];
+        if (list.length > 0) state.config = deepClone((selected || list[0]).default_config);
+        renderAllEditor();
+        showPreviewMode("idle");
+        dom.access.classList.add("is-hidden");
+        dom.workspace.hidden = dom.headerActions.hidden = false;
+        dom.workspace.classList.remove("is-hidden");
+        dom.headerActions.classList.remove("is-hidden");
+        await refreshPresets();
+        if (version === unlockVersion && incoming[2] === "preset") await loadPreset(incoming[3]);
+      } catch (err) {
+        if (version === unlockVersion) clearEditor(err.status ? err.message : "Browser Studio could not connect. " + LOCKED);
+      }
     }
 
     function init() {
       cacheDom();
       bindEvents();
-      return api("/api/v1/studio/catalog", "GET")
-        .then(function (catalog) {
-          state.catalog = catalog;
-          var list = catalog.templates || [];
-          for (var i = 0; i < list.length; i += 1) {
-            state.templatesById[list[i].template_id] = list[i];
-          }
-          populateThemeSelect();
-          if (list.length > 0) {
-            state.config = deepClone(list[0].default_config);
-          }
-          renderAllEditor();
-          showPreviewMode("idle");
-          return refreshPresets();
-        })
-        .catch(function (err) {
-          showBanner("Unable to initialize Prank Studio: " + err.message, "error");
-        });
+      return unlock();
     }
 
     return { init: init };

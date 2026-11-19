@@ -30,7 +30,7 @@ from poptrap.engine import (
     VisualIntensity,
     create_default_registry,
 )
-from poptrap.engine.runtime.server import create_runtime_app
+from tests.runtime_http import DOCUMENT, ORIGIN, runtime_client as connect
 from poptrap.engine.validation import validate_prank_config
 from poptrap.ui.screens.create_prank import CreatePrankScreen
 from poptrap.ui.screens.main_menu import MainMenuScreen
@@ -56,7 +56,8 @@ MODULAR_SCRIPTS = (
     "scripts/effects/particles.js",
     "scripts/effects/glitch.js",
     "scripts/effects.js",
-    "scripts/controller.js",
+    "scripts/document-key.js",
+  "scripts/controller.js",
     "scripts/runtime.js",
 )
 
@@ -97,8 +98,8 @@ def _parse_theme_blocks(css_text: str) -> dict[str, dict[str, str]]:
 @pytest.fixture()
 def runtime_client():
     controller = PrankController()
-    app = create_runtime_app(controller)
-    with TestClient(app) as client:
+    with connect(controller) as client:
+        client.headers.update({"Origin": ORIGIN, **DOCUMENT})
         yield controller, client
     controller.shutdown()
 
@@ -150,7 +151,8 @@ class TestBrowserAssetSecurityAndModularity:
             resp = client.get(f"/static/{style_path}")
             assert resp.status_code == 200, style_path
             assert "text/css" in resp.headers["content-type"]
-            assert "default-src 'self'" in resp.headers["content-security-policy"]
+            assert "default-src 'none'" in resp.headers["content-security-policy"]
+            assert "frame-ancestors 'none'" in resp.headers["content-security-policy"]
             assert resp.headers["x-content-type-options"] == "nosniff"
             assert resp.headers["referrer-policy"] == "no-referrer"
             assert resp.headers["cache-control"] == "no-store"
@@ -483,6 +485,7 @@ const scripts = [
   "scripts/effects/particles.js",
   "scripts/effects/glitch.js",
   "scripts/effects.js",
+  "scripts/document-key.js",
   "scripts/controller.js",
 ];
 
@@ -581,10 +584,11 @@ function runSession(sessionId, mode) {
     cancelAnimationFrame(id) { tasks.delete(id); },
     matchMedia: () => Object.assign(new Target(), { matches: false }),
     WebSocket: null,
+    crypto: require("node:crypto").webcrypto,
     fetch(relPath, init) {
       assert.ok(relPath.startsWith("/api/v1/sessions/"), `Unexpected fetch: ${relPath}`);
       requestedUrls.push(relPath);
-      return globalThis.fetch(baseUrl + relPath, init);
+      return globalThis.fetch(baseUrl + relPath, { ...init, headers: { ...init.headers, Origin: baseUrl } });
     },
     open() { throw new Error("window.open forbidden"); },
   });

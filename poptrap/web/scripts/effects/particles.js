@@ -19,7 +19,7 @@
 
     var opts = options && typeof options === "object" ? options : {};
     var viewport = core.getViewportInfo();
-    var cap = viewport.isCompact ? Math.min(8, HARD_MAX_PARTICLES) : HARD_MAX_PARTICLES;
+    var cap = viewport.isConstrained ? Math.min(6, HARD_MAX_PARTICLES) : HARD_MAX_PARTICLES;
     var requested = core.safeInt(opts.count, 0, HARD_MAX_PARTICLES, 8);
     var count = Math.min(requested, cap);
     if (count <= 0) {

@@ -24,9 +24,10 @@ from poptrap.core.modules import MAIN_MENU_MODULES, ModuleAvailability, ModuleId
 from poptrap.ui.screens import (
     BluetoothScreen,
     CreatePrankScreen,
+    LocalNetworkScreen,
     MainMenuScreen,
-    ModuleStatusScreen,
     SettingsScreen,
+    ShareLinkScreen,
 )
 from poptrap.ui.widgets import BrandHeader, MainMenuList, ResizeNotice
 from poptrap.utils.paths import get_project_root
@@ -69,9 +70,9 @@ def _make_app(
 
 
 class TestModuleRegistry:
-    """Verify exact Phase 1 menu structure and honest availability states."""
+    """Verify the original six-entry menu structure and current availability."""
 
-    def test_exact_six_modules_and_phase1_scope(self) -> None:
+    def test_exact_six_modules(self) -> None:
         assert len(MAIN_MENU_MODULES) == 6
         assert [m.module_id for m in MAIN_MENU_MODULES] == [
             ModuleId.CREATE_PRANK,
@@ -81,16 +82,9 @@ class TestModuleRegistry:
             ModuleId.SETTINGS,
             ModuleId.EXIT,
         ]
-        for implemented_spec in MAIN_MENU_MODULES[:2]:
-            assert implemented_spec.availability is ModuleAvailability.AVAILABLE
-            assert implemented_spec.is_available is True
-        for future_spec in MAIN_MENU_MODULES[2:4]:
-            assert future_spec.availability is ModuleAvailability.UNAVAILABLE
-            assert future_spec.is_available is False
-            assert future_spec.detail_key is not None
-        for active_spec in MAIN_MENU_MODULES[4:]:
-            assert active_spec.availability is ModuleAvailability.AVAILABLE
-            assert active_spec.is_available is True
+        for spec in MAIN_MENU_MODULES:
+            assert spec.availability is ModuleAvailability.AVAILABLE
+            assert spec.is_available is True
 
 
 class TestAppInitializationAndNavigation:
@@ -167,50 +161,27 @@ class TestAppInitializationAndNavigation:
             assert app.screen.query_one(MainMenuList).highlighted == 0
 
     @pytest.mark.parametrize(
-        ("shortcut", "expected_id", "back_key"),
-        [
-            ("3", ModuleId.QR_SHARE_LINK, "escape"),
-            ("3", ModuleId.QR_SHARE_LINK, "backspace"),
-            ("3", ModuleId.QR_SHARE_LINK, "b"),
-            ("4", ModuleId.LOCAL_NETWORK, "enter"),
-        ],
+        ("shortcut", "expected_screen", "back_key"),
+        [("3", ShareLinkScreen, "escape"), ("3", ShareLinkScreen, "backspace"),
+         ("3", ShareLinkScreen, "b"), ("4", LocalNetworkScreen, "enter")],
     )
-    async def test_future_phase_modules_show_unavailable_and_navigate_back(
-        self,
-        tmp_path: Path,
-        shortcut: str,
-        expected_id: ModuleId,
-        back_key: str,
+    async def test_delivery_menu_is_inert_until_creator_action(
+        self, tmp_path: Path, shortcut: str, expected_screen: type, back_key: str,
     ) -> None:
         app = _make_app(tmp_path)
         async with app.run_test(size=(80, 24)) as pilot:
-            await pilot.pause()
             await pilot.press(shortcut)
             await pilot.pause()
+            assert isinstance(app.screen, expected_screen)
+            assert app.delivery_server.manager is None
+            assert not app.experience_server.is_running
 
-            assert isinstance(app.screen, ModuleStatusScreen)
-            assert app.screen.module.module_id is expected_id
-            assert app.screen.module.is_available is False
-
-            status_text = str(
-                app.screen.query_one("#module-status-text", Static).render()
-            )
-            detail_text = str(
-                app.screen.query_one("#module-detail-text", Static).render()
-            )
-            assert "not available in phase 1" in status_text.lower()
-            assert "not implemented" in detail_text.lower()
-
-            # Strictly one actionable button ("Back") — no unfinished fake controls.
-            buttons = list(app.screen.query(Button))
-            assert [btn.id for btn in buttons] == ["btn-back"]
-            assert app.focused is buttons[0]
-
+            if back_key == "enter":
+                app.screen.query_one("#delivery-back", Button).focus()
             await pilot.press(back_key)
             await pilot.pause()
             assert isinstance(app.screen, MainMenuScreen)
-            menu = app.screen.query_one(MainMenuList)
-            assert menu.highlighted == int(shortcut) - 1
+            assert app.screen.query_one(MainMenuList).highlighted == int(shortcut) - 1
 
 
 class TestSettingsScreen:
@@ -360,7 +331,7 @@ class TestResizeUnicodeFallbackAndGracefulExit:
             await pilot.pause()
             await pilot.press("3")
             await pilot.pause()
-            assert isinstance(app.screen, ModuleStatusScreen)
+            assert isinstance(app.screen, ShareLinkScreen)
             await pilot.press("escape")
             await pilot.pause()
             assert isinstance(app.screen, MainMenuScreen)

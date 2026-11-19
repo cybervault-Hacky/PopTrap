@@ -72,7 +72,7 @@ class CapabilityDetector:
             report = self._backend.detect_capabilities(self._platform_info)
         except Exception as exc:  # noqa: BLE001 - convert any failure into ERROR state
             msg = f"Capability detection error ({type(exc).__name__}): {exc}"[:300]
-            self._logger.warning("Bluetooth capability check failed: %s", msg)
+            self._logger.warning("Bluetooth capability check failed (%s).", type(exc).__name__)
             err_check = CapabilityCheck(state=CapabilityState.ERROR, reason=msg)
             report = CapabilityReport(
                 checked_at=self._wall_clock().isoformat(),

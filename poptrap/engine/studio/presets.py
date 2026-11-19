@@ -32,17 +32,19 @@ from poptrap.core.exceptions import (
 from poptrap.core.logging_setup import get_logger
 from poptrap.engine.models import PrankTheme, TemplateId, _clean_safe_text
 from poptrap.engine.registry import TemplateRegistry
+from poptrap.engine.http_safety import strict_json
 from poptrap.engine.studio.composer import validate_studio_config
 from poptrap.engine.studio.models import (
     MAX_EXPERIENCE_NAME_LENGTH as STUDIO_MAX_NAME_LENGTH,
     StudioConfig,
 )
-from poptrap.utils.paths import ensure_private_directory, get_user_presets_dir
+from poptrap.utils.paths import ensure_private_directory, get_user_presets_dir, read_bounded_file
 
 PRESET_SCHEMA_VERSION: int = 1
 MAX_PRESET_ID_LENGTH: int = 48
 MAX_PRESET_FILE_BYTES: int = 65_536
 MAX_SAVED_PRESETS: int = 100
+MAX_PRESET_DIRECTORY_ENTRIES: int = 256
 
 _PRESET_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,47}$")
 _SLUG_STRIP_RE = re.compile(r"[^a-z0-9]+")
@@ -211,39 +213,20 @@ class PresetStore:
                 path=file_path,
             )
         try:
-            stat = file_path.stat()
+            text = read_bounded_file(file_path, MAX_PRESET_FILE_BYTES, follow_symlinks=False).decode("utf-8")
         except FileNotFoundError as exc:
             raise PresetNotFoundError(
-                f"Preset '{expected_id}' was not found.",
-                path=file_path,
+                f"Preset '{expected_id}' was not found.", path=file_path,
                 hint="Refresh the preset list or save a new preset.",
             ) from exc
-        except OSError as exc:
-            raise PresetStorageError(
-                f"Unable to access preset '{expected_id}' ({exc}).",
-                path=file_path,
-            ) from exc
-
-        if stat.st_size > MAX_PRESET_FILE_BYTES:
-            raise PresetFormatError(
-                f"Preset file '{file_path.name}' exceeds maximum size ({MAX_PRESET_FILE_BYTES} bytes).",
-                path=file_path,
-            )
-
-        try:
-            raw_text = file_path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError) as exc:
-            raise PresetFormatError(
-                f"Preset file '{file_path.name}' is not valid UTF-8 text.",
-                path=file_path,
-            ) from exc
+            raise PresetFormatError(f"Preset '{expected_id}' could not be read: {exc}", path=file_path) from exc
 
         try:
-            parsed = json.loads(raw_text)
-        except json.JSONDecodeError as exc:
+            parsed = strict_json(text)
+        except (ValueError, RecursionError) as exc:
             raise PresetFormatError(
-                f"Preset file '{file_path.name}' contains malformed JSON (line {exc.lineno}).",
-                path=file_path,
+                f"Preset '{expected_id}' contains invalid or ambiguous JSON.", path=file_path,
                 hint="Fix or delete the damaged preset file.",
             ) from exc
 
@@ -326,17 +309,25 @@ class PresetStore:
                     pass
 
     def _scan_records_locked(self) -> tuple[list[PresetRecord], list[str]]:
-        if not self._dir.exists():
+        entries: list[Path] = []
+        try:
+            if self._dir.is_symlink():
+                raise PresetStorageError("Presets directory cannot be a symbolic link.", path=self._dir)
+            with os.scandir(self._dir) as children:
+                for count, child in enumerate(children, start=1):
+                    if count > MAX_PRESET_DIRECTORY_ENTRIES:
+                        raise PresetStorageError(
+                            "Presets directory has too many entries. Move unused files out and retry.", path=self._dir,
+                        )
+                    entries.append(Path(child.path))
+        except FileNotFoundError:
             return [], []
-        if self._dir.is_symlink() or not self._dir.is_dir():
-            return [], ["Presets location is invalid."]
+        except OSError as exc:
+            raise PresetStorageError("Could not read the local presets directory.", path=self._dir) from exc
 
         records: list[PresetRecord] = []
         warnings: list[str] = []
-        try:
-            entries = sorted(self._dir.iterdir(), key=lambda p: p.name)
-        except OSError as exc:
-            return [], [f"Unable to read presets directory: {exc}"]
+        entries.sort(key=lambda p: p.name)
 
         for entry in entries:
             if entry.name.startswith(".") or entry.suffix != ".json":
@@ -350,9 +341,9 @@ class PresetStore:
                         path=entry,
                     )
                 records.append(self._read_and_validate_file(entry, checked))
-            except (PresetIdentifierError, PresetFormatError, PresetStorageError) as exc:
-                self._logger.warning("Skipping invalid preset '%s': %s", entry.name, exc.message)
-                warnings.append(f"{entry.name}: {exc.message}")
+            except (PresetIdentifierError, PresetFormatError, PresetStorageError, PresetNotFoundError):
+                self._logger.warning("Skipped an invalid local preset file.")
+                warnings.append(f"Could not load preset file {entry.name!r}.")
 
         records.sort(key=lambda r: (r.updated_at, r.name.lower()), reverse=True)
         return records, warnings
@@ -360,7 +351,10 @@ class PresetStore:
     def list_presets(self) -> tuple[tuple[PresetSummary, ...], tuple[str, ...]]:
         """List all valid saved local presets alongside any corrupt-file warnings."""
         with self._lock:
-            records, warnings = self._scan_records_locked()
+            try:
+                records, warnings = self._scan_records_locked()
+            except PresetStorageError as exc:
+                return (), (exc.message,)
             summaries = tuple(PresetSummary.from_record(rec) for rec in records)
             return summaries, tuple(warnings)
 
@@ -458,9 +452,7 @@ class PresetStore:
             )
             self._write_record_atomic(target_path, record)
             self._logger.info(
-                "Preset saved: id=%s name=%r template=%s",
-                record.preset_id,
-                record.name,
+                "Preset saved: template=%s",
                 config.template_id.value,
             )
             return record
@@ -505,9 +497,7 @@ class PresetStore:
                 config=updated_cfg,
             )
             self._write_record_atomic(file_path, updated)
-            self._logger.info(
-                "Preset renamed: id=%s new_name=%r", current.preset_id, cleaned_name
-            )
+            self._logger.info("Preset renamed.")
             return updated
 
     def duplicate_preset(
@@ -562,5 +552,5 @@ class PresetStore:
                     f"Unable to delete preset '{checked}' ({exc}).",
                     path=file_path,
                 ) from exc
-            self._logger.info("Preset deleted: id=%s", checked)
+            self._logger.info("Preset deleted.")
             return True

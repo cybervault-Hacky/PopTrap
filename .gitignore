@@ -40,3 +40,12 @@ Thumbs.db
 *.swp
 *.swo
 *~
+
+# Local, unpublished release builds
+release-artifacts/
+
+# Local configuration secrets and interrupted writes
+.env
+.env.*
+!.env.example
+*.tmp

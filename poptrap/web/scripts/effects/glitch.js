@@ -276,7 +276,6 @@
       durationMs: config.durationMs,
       mode: "raf",
       reducedIntervalMs: 220,
-      hiddenIntervalMs: 450,
       onTick: function (state) {
         var ratio = state.ratio;
         var pct = Math.min(100, Math.round(ratio * 100));
@@ -333,7 +332,7 @@
 
           if (!announcedRecovery) {
             announcedRecovery = true;
-            a11y.announce("Glitch simulation stabilizing display signal.");
+            a11y.announce("Glitch simulation stabilizing display signal.", disposer);
             if (config.soundEnabled) {
               ctx.sound.playChime();
             }
