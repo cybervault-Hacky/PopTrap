@@ -21,6 +21,8 @@
 
 Reproduce every install-level claim above with `python3 tools/verify_install.py` (see [Verify the installation yourself](#verify-the-installation-yourself)).
 
+**Which evidence is which.** The install-level claims above come from `tools/verify_install.py`; the automated suite behind them is `pytest` plus the Node browser-component tests (50), both run by the CI workflow and reproducible from [Contributor install](#contributor-install-run-the-test-suite). Real Chromium automation is part of neither: it lives in the standalone Playwright scripts under `tests/browser/`, which `pytest` does not collect, and neither Playwright nor Chromium was installed for the installation and compatibility work behind this candidate. The Chromium captures in `docs/images/` and the browser rows of the [compatibility matrix](docs/compatibility.md) come from the earlier phase-10 reference run recorded in [docs/phase-10.md](docs/phase-10.md).
+
 ## Installation & setup
 
 The supported installation is **Linux with CPython 3.11 in a dedicated virtual environment**, using the hash-locked dependency profile in `requirements/runtime.lock`. Each step below states the directory to run it from, whether the virtual environment must be active, what success looks like, and what to do when it fails.
@@ -63,7 +65,7 @@ POPTRAP requires **CPython 3.11 or newer**; 3.11 is the verified release profile
 | `venv` support for that interpreter | Keeps POPTRAP out of your system Python. | `python3.11 -m venv --help` |
 | Access to `pypi.org` | The locked wheels are downloaded from PyPI with hash verification. | `python3.11 -m pip download --no-deps -d /tmp/probe segno` |
 | A real terminal, 44 × 12 minimum (80 × 24 recommended) | The creator interface is a full-screen TUI. | `tput cols; tput lines` |
-| A browser (Chromium verified) | Recipients and Studio open in a browser tab. | Open any local page |
+| A browser (Chromium is the verified reference) | Recipients and Studio open in a browser tab. | Open any local page |
 
 Debian and Ubuntu ship `venv` support as a separate package. If `python3.11 -m venv .venv` fails with *The virtual environment was not created successfully because ensurepip is not available*, install it and retry:
 
