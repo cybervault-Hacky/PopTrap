@@ -293,7 +293,7 @@ node --test tests/web/*.mjs        # needs Node.js 22; optional
 python tools/verify_install.py     # full install verification; needs network
 ```
 
-Success looks like: `No broken requirements found.`, then a pytest summary line such as `545 passed, 1 skipped` (the skip is the opt-in networked fresh-install test), then `# pass 50` from Node, then `POPTRAP installation verification: 97/97 passed, 0 warning(s), 0 failure(s).` Counts grow as tests are added; a non-zero failure count or any `FAIL` line is what matters.
+Success looks like: `No broken requirements found.`, then a pytest summary line such as `549 passed, 1 skipped` (the skip is the opt-in networked fresh-install test), then `# pass 50` from Node, then `POPTRAP installation verification: 98/98 passed, 0 warning(s), 0 failure(s).` Counts grow as tests are added; a non-zero failure count or any `FAIL` line is what matters.
 
 `requirements.txt` at the repository root lists *ranges*, not the verified profile — it resolves to whatever PyPI publishes today (currently `fastapi 0.165.0` instead of the locked `0.164.0`). Install the locks, not that file.
 

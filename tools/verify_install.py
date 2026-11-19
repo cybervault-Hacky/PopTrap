@@ -308,6 +308,44 @@ def profile_env(workdir: Path, name: str) -> dict[str, str]:
     return env
 
 
+#: Characters that give a YAML plain scalar a special meaning.
+YAML_RESERVED_STARTS = frozenset("*&!%@`#[]{}>|,'\"")
+
+
+def find_unsafe_workflow_scalars(workflow_dir: Path) -> list[str]:
+    """Find ``run:`` steps whose unquoted value YAML cannot represent faithfully.
+
+    GitHub rejects a workflow whose YAML does not parse, and it does so before
+    creating any job, so the run fails in 0 seconds with no log at all. Two silent
+    traps matter here: a plain scalar may not contain ": " (colon plus space),
+    which ``--only-binary=:all: -r requirements/...`` does contain, and a " #"
+    sequence starts a comment that truncates the command. Quoted and block scalars
+    preserve the shell text verbatim and are always safe.
+    """
+    offenders: list[str] = []
+    if not workflow_dir.is_dir():
+        return offenders
+    run_step = re.compile(r"^\s*-?\s*run:\s*(?P<value>\S.*)$")
+    for workflow in sorted((*workflow_dir.glob("*.yml"), *workflow_dir.glob("*.yaml"))):
+        for number, line in enumerate(workflow.read_text(encoding="utf-8").splitlines(), 1):
+            match = run_step.match(line)
+            if match is None:
+                continue
+            value = match.group("value").strip()
+            if value[0] in {"'", '"', "|", ">"}:
+                continue
+            problems = []
+            if ": " in value or value.endswith(":"):
+                problems.append('plain scalar contains ": "')
+            if " #" in value:
+                problems.append('plain scalar contains " #" (comment truncation)')
+            if value[0] in YAML_RESERVED_STARTS:
+                problems.append("starts with a reserved YAML indicator")
+            if problems:
+                offenders.append(f"{workflow.name}:{number} {' and '.join(problems)}")
+    return offenders
+
+
 def stage_structure(report: Report) -> None:
     """Validate lock files and packaging metadata offline."""
     stage = "structure"
@@ -437,6 +475,12 @@ def stage_structure(report: Report) -> None:
         stage, "console script entry point is declared",
         metadata["project"]["scripts"].get("poptrap") == "poptrap.cli:main",
         json.dumps(metadata["project"]["scripts"]),
+    )
+
+    workflow_offenders = find_unsafe_workflow_scalars(ROOT / ".github" / "workflows")
+    report.check(
+        stage, "workflow run steps are valid YAML plain scalars",
+        not workflow_offenders, ", ".join(workflow_offenders),
     )
 
     documented = [

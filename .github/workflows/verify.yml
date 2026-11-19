@@ -19,7 +19,10 @@ jobs:
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: '22'
-      - run: python -m pip install --require-hashes --only-binary=:all: -r requirements/test.lock -r requirements/build.lock
+      # Quoted: "--only-binary=:all: -r" contains ": ", which is illegal inside an
+      # unquoted YAML plain scalar and made GitHub reject this workflow before any
+      # job was created (every run failed in 0s).
+      - run: 'python -m pip install --require-hashes --only-binary=:all: -r requirements/test.lock -r requirements/build.lock'
       - run: python -m pip check
       - name: Verify lock hashes and per-platform wheel availability
         run: python tools/verify_install.py --stages structure,hashes,platforms

@@ -16,6 +16,7 @@ from __future__ import annotations
 import ast
 import importlib
 import importlib.metadata
+import importlib.util
 import os
 import re
 import subprocess
@@ -609,6 +610,82 @@ class TestInstallationDocumentation:
             text = (ROOT / document).read_text(encoding="utf-8")
             assert "linux_aarch64" in text, f"{document} must record the concrete Termux blocker"
             assert re.search(r"Termux[^\n]*not (a )?supported", text, re.IGNORECASE), document
+
+
+_VERIFY_INSTALL_TOOL: Any = None
+
+
+def verify_install_tool() -> Any:
+    """Load ``tools/verify_install.py`` once so tests reuse one implementation.
+
+    The module has to be registered in ``sys.modules`` while it executes: it
+    defines dataclasses whose annotations reference a module-level alias, and
+    ``dataclasses`` resolves those through the owning module.
+    """
+    global _VERIFY_INSTALL_TOOL
+    if _VERIFY_INSTALL_TOOL is not None:
+        return _VERIFY_INSTALL_TOOL
+    path = ROOT / "tools" / "verify_install.py"
+    spec = importlib.util.spec_from_file_location("poptrap_verify_install", path)
+    assert spec is not None and spec.loader is not None, path
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.modules.pop(spec.name, None)
+    _VERIFY_INSTALL_TOOL = module
+    return module
+
+
+class TestWorkflowIntegrity:
+    """A workflow GitHub cannot parse fails in 0 seconds and creates no job.
+
+    Every run of this repository's workflow failed that way until the ``run:``
+    value containing ``--only-binary=:all: -r`` was quoted: ": " is illegal in an
+    unquoted YAML plain scalar. These checks keep that class of failure out.
+    """
+
+    WORKFLOW = ROOT / ".github" / "workflows" / "verify.yml"
+
+    def test_run_steps_are_valid_yaml_plain_scalars(self) -> None:
+        offenders = verify_install_tool().find_unsafe_workflow_scalars(self.WORKFLOW.parent)
+        assert offenders == [], f"unparseable workflow step(s): {offenders}"
+
+    def test_guard_actually_detects_the_historical_bug(self, tmp_path: Path) -> None:
+        workflows = tmp_path / "workflows"
+        workflows.mkdir()
+        command = "python -m pip install --require-hashes --only-binary=:all: -r requirements/test.lock"
+        (workflows / "bad.yml").write_text(
+            "jobs:\n  regression:\n    steps:\n"
+            f"      - run: {command}\n"
+            f"      - run: '{command}'\n",
+            encoding="utf-8",
+        )
+        offenders = verify_install_tool().find_unsafe_workflow_scalars(workflows)
+        assert offenders == ['bad.yml:4 plain scalar contains ": "'], offenders
+
+    def test_workflow_keeps_the_installation_gates(self) -> None:
+        text = self.WORKFLOW.read_text(encoding="utf-8")
+        for command in (
+            "python -m pip check",
+            "python -m pytest -q",
+            "node --test tests/web/*.mjs",
+            "python tools/build_release.py",
+            "tools/check_install.py",
+            "tools/verify_install.py --stages structure,hashes,platforms",
+            "tools/verify_install.py --stages fresh",
+        ):
+            assert command in text, f"workflow no longer runs: {command}"
+        assert "--require-hashes --only-binary=:all:" in text
+
+    def test_workflow_parses_as_yaml_when_a_parser_is_available(self) -> None:
+        yaml = pytest.importorskip("yaml", reason="PyYAML is not part of the locked test profile.")
+        data = yaml.safe_load(self.WORKFLOW.read_text(encoding="utf-8"))
+        steps = data["jobs"]["regression"]["steps"]
+        assert steps
+        assert all(("run" in step) ^ ("uses" in step) for step in steps)
+        assert data["jobs"]["regression"]["timeout-minutes"] >= 15
 
 
 @pytest.mark.skipif(
