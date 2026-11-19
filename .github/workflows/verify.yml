@@ -28,10 +28,10 @@ jobs:
         run: |
           set -o pipefail
           python tools/verify_install.py --stages structure,hashes,platforms 2>&1 | tee "$RUNNER_TEMP/verify-locks.txt"
-      # The LAN containment test binds a real socket to a real host address, so its
-      # outcome depends on how this runner routes to that address. Record the facts as
-      # a notice annotation, which is readable from the API without fetching job logs.
-      - name: Record runner networking facts for the LAN boundary test
+      # The LAN containment test binds a real socket to a real host address, so the branch
+      # it asserts depends on the peer this runner presents to that address. Record those
+      # facts as a notice annotation, readable from the API without fetching job logs.
+      - name: Record the peers this runner presents to its own LAN addresses
         run: |
           set -o pipefail
           python - <<'PY' | tee "$RUNNER_TEMP/lan-diagnostic.txt"
@@ -39,13 +39,9 @@ jobs:
           import subprocess
           from ipaddress import IPv4Address
 
-          import httpx
-
           from poptrap.engine.delivery.security import list_lan_interfaces
-          from poptrap.engine.delivery.server import DeliveryServer
 
-          interfaces = list_lan_interfaces()
-          for item in interfaces:
+          for item in list_lan_interfaces():
               address = str(item.address.ip)
               route = subprocess.run(
                   ["ip", "route", "get", address], capture_output=True, text=True, check=False,
@@ -60,20 +56,6 @@ jobs:
                       accepted.close()
               inside = IPv4Address(observed) in item.address.network
               print(f"{item.label} | route: {route} | src: {selected} | peer: {observed} | in-subnet: {inside}")
-
-          if interfaces:
-              delivery = DeliveryServer()
-              endpoint = delivery.start(interfaces[0], lan_confirmed=True)
-              try:
-                  with httpx.Client(trust_env=False, timeout=3) as http:
-                      response = http.get(endpoint.origin + "/availability")
-                  print(
-                      f"delivery {endpoint.origin} | host-header: {response.request.headers.get('host')!r} "
-                      f"| authority: {endpoint.authority!r} | status: {response.status_code} "
-                      f"| body: {response.text[:110]!r}"
-                  )
-              finally:
-                  delivery.stop()
           PY
           python - <<'PY'
           import os
