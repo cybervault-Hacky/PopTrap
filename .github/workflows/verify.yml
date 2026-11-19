@@ -21,6 +21,8 @@ jobs:
           node-version: '22'
       - run: python -m pip install --require-hashes --only-binary=:all: -r requirements/test.lock -r requirements/build.lock
       - run: python -m pip check
+      - name: Verify lock hashes and per-platform wheel availability
+        run: python tools/verify_install.py --stages structure,hashes,platforms
       - run: python -m pytest -q
       - run: node --test tests/web/*.mjs
       - name: Build and verify locally
@@ -35,3 +37,5 @@ jobs:
           poptrap-installed/bin/python -m pip install --no-deps poptrap-build/*.whl
           poptrap-installed/bin/python -m pip check
           poptrap-installed/bin/python -I "$GITHUB_WORKSPACE/tools/check_install.py"
+      - name: Verify the documented fresh-install flow end to end
+        run: python tools/verify_install.py --stages fresh --workdir "$RUNNER_TEMP/poptrap-verify"

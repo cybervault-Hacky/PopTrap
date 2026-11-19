@@ -29,6 +29,26 @@ MIN_PYTHON_VERSION: tuple[int, int] = (3, 11)
 
 _VERSION_NUMBERS_RE = re.compile(r"^\s*(\d+)(?:\.(\d+))?(?:\.(\d+))?")
 
+#: Exact command that installs the verified runtime profile. Reported verbatim so a
+#: broken or partial install has one unambiguous repair step.
+LOCKED_INSTALL_COMMAND: str = (
+    "python -m pip install --require-hashes --only-binary=:all: -r requirements/runtime.lock"
+)
+
+#: Android Termux is recognized as a platform but is not a verified install or runtime
+#: target. ``pydantic-core`` (a locked runtime dependency) publishes no wheel for
+#: Termux's bare ``linux_aarch64`` platform tag, so the hash-locked, wheel-only install
+#: cannot complete there without a Rust >= 1.88 plus maturin source build that this
+#: project has not performed. Report this instead of implying support.
+TERMUX_UNSUPPORTED_NOTICE: str = (
+    "Android Termux is not a supported install or runtime target for this release. "
+    "The locked pydantic-core dependency publishes no wheel for Termux's 'linux_aarch64' "
+    "platform tag, so the wheel-only hash-locked install cannot complete there without an "
+    "unverified Rust >= 1.88 and maturin source build. Install POPTRAP on a supported "
+    "Linux host instead; an Android recipient can open a consensual invitation in a "
+    "browser from that host. See docs/compatibility.md and docs/installation.md."
+)
+
 
 @dataclass(frozen=True, slots=True)
 class DependencySpec:
@@ -250,6 +270,9 @@ def check_environment(
             f"Python {required_python}+ is required, but Python {python_version} is running."
         )
 
+    if pinfo.is_termux:
+        warnings.append(TERMUX_UNSUPPORTED_NOTICE)
+
     for dep in dependencies:
         if not dep.available:
             errors.append(
@@ -302,7 +325,11 @@ def enforce_environment(
         raise MissingDependencyError(
             f"Missing or incompatible runtime dependencies: {listed}.",
             missing=names,
-            hint="Reinstall the documented locked runtime dependencies in your virtual environment.",
+            hint=(
+                "Activate the Python 3.11 virtual environment you installed into, run this "
+                "from the POPTRAP source or bundle directory, and repeat the check: "
+                f"'{LOCKED_INSTALL_COMMAND}'. Never use 'sudo pip' or the system interpreter."
+            ),
         )
 
     if require_tui and not report.terminal.supports_tui:

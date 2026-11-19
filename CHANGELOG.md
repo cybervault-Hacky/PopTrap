@@ -2,6 +2,19 @@
 
 Versions follow Semantic Versioning. Python packaging uses the equivalent PEP 440 spelling for prereleases (`0.2.0rc1` for `0.2.0-rc.1`).
 
+## Unreleased
+
+Installation, compatibility and documentation fixes on top of `0.2.0-rc.1`. The application version, architecture, dependency floors, hash locks and consent-first safeguards are unchanged.
+
+- Fix the `--check` readiness report: distribution names longer than the fixed 18-column label field (`markdown-it-py`, `opentelemetry-api`) wrapped mid-word and were detached from their own version row. The label column is now sized from its content, never wraps, and ellipsizes only in very narrow output.
+- Stop implying Termux support. Android Termux is still detected, but now emits an explicit notice recording the verified blocker: the locked `pydantic-core` publishes no wheel for Termux's bare `linux_aarch64` platform tag (Bionic, not glibc), and its source distribution requires maturin plus Rust 1.88, which was never built or verified. The unrecognized-OS notice no longer lists Termux as a target, and `PlatformInfo.is_supported_os` documents that recognition is not a support claim.
+- Report the exact repair command when runtime dependencies are missing or too old, instead of a generic instruction to reinstall.
+- Add `tools/verify_install.py`: verifies lock structure offline, every lock hash against the digests PyPI publishes (and that no published file is missing from the lock), hash-verified wheel availability for Linux x86_64/ARM64, Windows x86_64, macOS Intel and Apple Silicon, CPython 3.12–3.14, and the Termux `linux_aarch64` failure as an assertion; then runs a complete fresh install into clean virtual environments covering both documented profiles, every CLI command and exit code, the installed smoke test, and uninstall behavior.
+- Add `tests/test_installation.py` covering lock integrity, dependency-declaration consistency across `pyproject.toml`, `requirements.txt`, the locks and the CLI health check, packaging artifacts, runtime imports (including the optional, lazily imported `bleak` contract), CLI startup flags, dependency failure guidance, Termux honesty and documentation consistency. The networked fresh-install harness runs under `POPTRAP_VERIFY_INSTALL=1`.
+- Clarify that `requirements.txt` holds ranges rather than the verified profile, and that it currently drifts from the lock (`fastapi 0.165.0` versus the locked `0.164.0`).
+- Rewrite the README installation documentation: a platform support table, and per-command directory, virtual-environment state, expected output and failure remedy for prerequisites, clone, venv, locked install, verification, launch, configuration initialization, environment variables, wheel install, contributor install, Termux, Windows, macOS, troubleshooting and uninstall. Record the same evidence in the installation guide, compatibility matrix and troubleshooting guide.
+- Run `tools/verify_install.py --stages structure,hashes,platforms` and `--stages fresh` in the repository workflow.
+
 ## 0.2.0-rc.1 — 2026-11-18
 
 First release candidate; not a stable or publicly published release.

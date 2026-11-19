@@ -22,6 +22,12 @@ EXIT_ENVIRONMENT_ERROR: int = 2
 EXIT_CONFIG_ERROR: int = 3
 EXIT_INTERRUPTED: int = 130
 
+# Bounds for the ``--check`` label column. The widest real labels are dependency
+# names such as "Dep: opentelemetry-api", which the previous fixed width of 18
+# wrapped mid-word, detaching a version from its own row.
+CHECK_LABEL_MIN_WIDTH: int = 18
+CHECK_LABEL_MAX_WIDTH: int = 32
+
 
 def build_parser() -> argparse.ArgumentParser:
     """Create the POPTRAP command-line argument parser."""
@@ -114,8 +120,27 @@ def _render_check_report(
     console.print(title)
     console.print(Text("─" * 56, style="bright_black"))
 
+    dep_rows = tuple(
+        (
+            f"Dep: {dep.distribution}",
+            Text(
+                f"{dep.installed_version or 'missing'} ({'OK' if dep.ok else 'FAIL'})",
+                style="white" if dep.ok else "red",
+            ),
+        )
+        for dep in report.dependencies
+    )
+    # Size the label column from its real content so long distribution names stay
+    # on the same row as their version, and ellipsize only in very narrow output.
+    label_width = min(
+        CHECK_LABEL_MAX_WIDTH,
+        max(
+            CHECK_LABEL_MIN_WIDTH,
+            *(len(label) for label in ("Interactive TUI", "Config File", *(label for label, _ in dep_rows))),
+        ),
+    )
     grid = Table.grid(padding=(0, 2))
-    grid.add_column(style="dim", width=18)
+    grid.add_column(style="dim", width=label_width, no_wrap=True, overflow="ellipsis")
     grid.add_column(style="white")
 
     pinfo = report.platform
@@ -137,13 +162,8 @@ def _render_check_report(
         ),
     )
 
-    for dep in report.dependencies:
-        dep_label = dep.installed_version or "missing"
-        dep_state = "OK" if dep.ok else "FAIL"
-        grid.add_row(
-            f"Dep: {dep.distribution}",
-            Text(f"{dep_label} ({dep_state})", style="white" if dep.ok else "red"),
-        )
+    for label, value in dep_rows:
+        grid.add_row(label, value)
 
     grid.add_row("Config File", Text(str(config_path)))
     grid.add_row("Log File", Text(str(log_path) if log_path is not None else "disabled"))
